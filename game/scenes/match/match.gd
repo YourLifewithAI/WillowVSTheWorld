@@ -604,6 +604,9 @@ func _srv_hit(aid: int, tid: int, ability: int, dir: Vector2, ambush: bool) -> v
 	if ability == 1 and kind == Roster.Special.PULL:
 		d = Iso.to_floor(a.position - t.position).normalized()
 		knock_scale = clampf(Iso.fdist(a.position, t.position) / float(spec["radius"]), 0.35, 1.0)
+	elif ability == 3 and spec.get("effect", "") == "pull":
+		# Reeled in under the claw: close targets get a gentler tug, so they don't fly past.
+		knock_scale = clampf(Iso.fdist(a.position, t.position) / float(spec["range"]), 0.35, 1.0)
 	# Hits from hiding hurt twice as much (if the attacker really was hidden).
 	var ambushed := ambush and Time.get_ticks_msec() / 1000.0 - a.last_stealth_time < 0.6
 	if ambushed:
@@ -624,14 +627,28 @@ func _apply_hit(a: Player, t: Player, spec: Dictionary, d: Vector2, knock_scale:
 	knock *= float(t.data.get("knock_mult", 1.0))
 	if t.data.get("flips", false) and knock >= FLIP_KNOCK:
 		stun = maxf(stun, 1.5)
+	var effect := String(spec.get("effect", ""))
+	if effect == "pull":
+		d = -d  # yanked toward the attacker
 	t.hp = maxi(0, t.hp - roundi(damage))
-	if remote.carrier_pid == t.pid and remote.state == TVRemote.State.CARRIED:
+	if effect == "drain" and not a.is_ko:
+		var healed := mini(a.max_hp, a.hp + roundi(damage * float(spec.get("effect_value", 0.5))))
+		if healed > a.hp:
+			a.hp = healed
+			_cl_heal.rpc(a.pid, a.hp)
+	if effect == "steal" and remote.state == TVRemote.State.CARRIED and remote.carrier_pid == t.pid and not a.is_ko:
+		# Snatched right out of their paws (or grabber).
+		remote.carrier_pid = a.pid
+		remote.hold = 0.0
+		_cl_event.rpc("%s snatched the remote from %s!" % [a.display_name, t.display_name], Roster.TEAM_COLORS[a.team])
+	elif remote.carrier_pid == t.pid and remote.state == TVRemote.State.CARRIED:
 		remote.hold = 0.0
 		# A dog never lets go of a bone, though.
 		if t.data.get("butterfingers", false) and t.hp > 0 and not t.has_bone():
 			_drop_remote(t.position)
 			_cl_event.rpc("%s dropped the remote! (butterfingers)" % t.display_name, Roster.TEAM_COLORS[t.team])
-	_cl_damaged.rpc(t.pid, t.hp, d * knock, stun, ambushed)
+	var hop := float(spec.get("effect_value", 0.0)) if effect == "knockup" else 0.0
+	_cl_damaged.rpc(t.pid, t.hp, d * knock, stun, ambushed, hop)
 	if t.hp <= 0:
 		_ko(t, a)
 
@@ -649,9 +666,15 @@ const KO_VERBS: Array[String] = ["bonked", "booped", "flattened", "yeeted", "sat
 
 
 @rpc("authority", "call_local", "reliable")
-func _cl_damaged(tid: int, new_hp: int, knock: Vector2, stun: float, ambushed: bool) -> void:
+func _cl_damaged(tid: int, new_hp: int, knock: Vector2, stun: float, ambushed: bool, hop: float) -> void:
 	if players.has(tid):
-		players[tid].on_damaged(new_hp, knock, stun, ambushed)
+		players[tid].on_damaged(new_hp, knock, stun, ambushed, hop)
+
+
+@rpc("authority", "call_local", "reliable")
+func _cl_heal(pid: int, new_hp: int) -> void:
+	if players.has(pid):
+		players[pid].heal(new_hp)
 
 
 ## Can players on `viewer_team` see `p` right now? Hidden characters show up

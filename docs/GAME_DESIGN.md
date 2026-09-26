@@ -67,6 +67,7 @@ same four jobs, filled by very different characters.
 | Input | What it does |
 |---|---|
 | **Attack** | Fire (or swing) your character's weapon. Holding it keeps automatic weapons going. |
+| **Up close** (interact) | Your close-up move (see *Close-up moves* below). While carrying the remote, the same button throws it. |
 | **Special** | Your signature move, on a cooldown (3.5 to 9 s). |
 | **Gag** | Your big, silly, charge-up move (see *Gags* below). |
 | **Dash** | A quick burst on a 1.1 s cooldown. Some characters' dashes are shorter. |
@@ -83,6 +84,28 @@ same four jobs, filled by very different characters.
   **debris**: fur tufts for pets, loose bolts for robots.
 - Hits are resolved by the host (see *Networking*): no death, no permanent loss,
   and friendly fire is off.
+
+### Close-up moves
+
+Most weapons work at range, so everyone also has a **close-up move** on the
+interact button: a short swing in a cone with one twist that fits who they are.
+It's how you fight someone who's right on top of you, and several are built to
+interrupt a carrier on their rug (any hit resets the channel). Swinging ties up
+your weapon for 0.25 s, so it's a choice, not a free extra attack.
+
+| Move | Who | Reach, cone, cooldown | What it does |
+|---|---|---|---|
+| **Pounce** | Willow | 18 px + a 28 px hop, 90°, 1.4 s | Wiggle, hop forward, swipe where she lands (stops early at the first enemy). 12 damage, 24 plus a daze from hiding. Catches runaway carriers. |
+| **Making Biscuits** | Biscuit | 18 px, 110°, 0.5 s | Rapid kneading: 6 damage a knead, heals her for half, never stuns (so just walk away). Shreds furniture (15 each). |
+| **Gimme!** | Pepper | 18 px, 70°, 2 s | A 5-damage nip that **steals the remote** from the carrier. Butterfingers means his next bonk drops it again. |
+| **Peck Peck Peck** | Kiwi | 16 px, 60°, 0.18 s | Mash it: 3-damage pecks that keep resetting a carrier's channel, and hit things hard enough (260) to topple heavy shelves. |
+| **Spot Clean** | Zoomba | 20 px, all round, 1.5 s | Spins in place: 8 damage and a big fling to everyone around it. From under the couch, an ambush on the whole crowd. |
+| **Spatula Flip** | Unit-7 | 20 px, 90°, 3.5 s | Flips the target 20 px into the air like a pancake, helpless for 0.6 s. The bouncer's answer to divers. |
+| **Yoink!** | The Claw | 26 px, 60°, 2.2 s | Grabs and reels the target in under the gantry, dazed for 0.3 s: set up for the wrecking ball or Claw Drop. |
+| **Feedback** | Bass | 22 px, 150°, 2.5 s | A mic-feedback squeal: 4 damage, huge knockback (330). Blows pouncers and pups off a carrier, and topples shelves. |
+
+Numbers live in `"melee"` in `game/scripts/core/roster.gd`; the effects are
+`lunge`, `drain`, `steal`, `shove_items`, `knockup` and `pull`.
 
 ### Gags
 

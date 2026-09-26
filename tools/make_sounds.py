@@ -362,6 +362,80 @@ def _():
     return np.tanh(2.0 * x)
 
 
+# ------------------------------------------------------------ close-up moves
+# One per "look" of a melee move: "sfx" in roster.gd, or "m_" + its look.
+
+@sound("m_swipe", 0.75)
+def _():
+    # Willow's pounce: a butt-wiggle rustle, a chirpy "mrrp!", then a claw swish.
+    rustle = svf(noise(0.12), 1800, 0.6, "bp") * (0.5 + 0.5 * np.sin(2 * np.pi * 22 * times(n_of(0.12)))) * env([(0, 0), (0.02, 0.6), (0.12, 0)], 0.12)
+    mrrp = meow(900, 0.12)
+    swish = whoosh(0.1, 2500, 6000, 0.9)
+    return place([(0, 0.5 * rustle), (0.08, 0.7 * mrrp), (0.16, swish)])
+
+
+@sound("m_knead", 0.8)
+def _():
+    # Biscuit making biscuits: a deep purr under soft paw pats.
+    d = 0.4
+    t = times(n_of(d))
+    purr = lowpass(osc("saw", 55.0, d) + 0.4 * noise(d), 500) * (0.55 + 0.45 * np.sin(2 * np.pi * 25 * t)) * env([(0, 0), (0.05, 1), (d, 0)], d)
+    pat = lambda: burst(0.05, 1200, 0.012) + 0.6 * thump(0.05, 220, 150, 0.015)
+    return place([(0, 0.6 * purr), (0.02, pat()), (0.15, 0.8 * pat()), (0.28, 0.7 * pat())])
+
+
+@sound("m_chomp", 0.85)
+def _():
+    # Pepper's "Gimme!": an excited yip and a wet cartoon chomp.
+    yip = woof(560, 0.08, 3200)
+    snap = svf(noise(0.05), 1600, 0.3, "bp") * decay(0.05, 0.012)
+    return place([(0, 0.6 * yip), (0.09, snap), (0.09, 0.6 * thump(0.08, 240, 110, 0.02))])
+
+
+@sound("m_peck", 0.55)
+def _():
+    # One peck of Kiwi's mashed woodpecker routine (plus a tiny chirp now and then).
+    return mix(woodblock(2600, 0.05), 0.25 * chirp(3200, 4200, 0.04))
+
+
+@sound("m_spin", 0.75)
+def _():
+    # Zoomba's spot clean: a rising brush whirr with plasticky flicks.
+    d = 0.4
+    t = times(n_of(d))
+    brush = lowpass(noise(d), curve([(0, 1200), (d, 4000)], d)) * (0.5 + 0.5 * np.sin(2 * np.pi * 36 * t))
+    motor = 0.35 * osc("saw", glide(160, 380, d)) * env([(0, 0), (0.05, 1), (d, 0)], d)
+    flicks = place([(0.1 + 0.08 * k, 0.5 * woodblock(900 + 150 * k, 0.04)) for k in range(3)])
+    return mix(brush * env([(0, 0), (0.05, 1), (d, 0)], d), motor, flicks)
+
+
+@sound("m_flip", 0.8)
+def _():
+    # Unit-7's spatula: a metal "shwing", a springy BOING, then a little sizzle.
+    shwing = highpass(noise(0.08), 4000) * env([(0, 0), (0.01, 1), (0.08, 0)], 0.08) + 0.3 * osc("sine", glide(2500, 3500, 0.08)) * decay(0.08, 0.04)
+    boing = osc("tri", vibrato(glide(150, 420, 0.3), 8.0, 16)) * decay(0.3, 0.12)
+    sizzle = highpass(noise(0.3), 5000) * env([(0, 0), (0.05, 0.3), (0.3, 0)], 0.3)
+    return place([(0, 0.6 * shwing), (0.06, boing), (0.2, sizzle)])
+
+
+@sound("m_yoink", 0.75)
+def _():
+    # The Claw's yoink: claw-machine clack-clack, then a slide whistle going up.
+    clack = lambda: mix(burst(0.03, 5000, 0.006), 0.5 * woodblock(1400, 0.04))
+    whistle = osc("sine", vibrato(expcurve([(0, 600), (0.25, 1800)], 0.25), 0.3, 7)) * env([(0, 0), (0.03, 1), (0.22, 0.8), (0.25, 0)], 0.25)
+    return place([(0, clack()), (0.07, clack()), (0.13, 0.5 * whistle)])
+
+
+@sound("m_feedback", 0.75)
+def _():
+    # Bass's feedback: a rising mic squeal into a subwoofer thump, with rattling china.
+    d = 0.3
+    f = vibrato(glide(1600, 2900, d), 1.0, 11)
+    squeal = (osc("sine", f) + 0.25 * osc("square", f * 0.5, duty=0.3)) * env([(0, 0), (0.04, 0.8), (d, 1)], d)
+    rattle = place([(0.02 * k, 0.25 * woodblock(3000 + 400 * (k % 3), 0.03)) for k in range(8)])
+    return place([(0, 0.55 * squeal), (d, thump(0.25, 90, 40, 0.08)), (d, rattle)])
+
+
 # ----------------------------------------------------------------- specials
 
 @sound("bark", 1.1)

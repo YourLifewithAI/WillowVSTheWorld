@@ -11,8 +11,8 @@ extends CanvasLayer
 ## session: a menu opened from a controller offers "Keep playing" and "Back to
 ## lobby".
 
-const KEY_HINT := "Move: WASD   Attack: J   Special: K   Gag: I   Dash: Space   Throw remote: E"
-const PAD_HINT := "Stick: move   Bottom: dash   Left: attack   Top: special   Right: throw the remote   SL/SR: gag   + or -: menu"
+const KEY_HINT := "Move: WASD   Attack: J   Special: K   Up close (or throw the remote): E   Gag: I   Dash: Space"
+const PAD_HINT := "Stick: move   Bottom: dash   Left: attack   Top: special   Right: up close (or throw the remote)   SL/SR: gag   + or -: menu"
 
 var arena: Match
 

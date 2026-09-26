@@ -248,9 +248,10 @@ func _show_detail(id: String) -> void:
 	var c: Dictionary = Roster.get_char(id)
 	var sp: Dictionary = c["special"]
 	var g: Dictionary = c["gag"]
-	_detail.text = "%s the %s (%s): %s\nWeapon: %s   ·   Special: %s   ·   HP %d   ·   Speed %d\nGag: %s. %s\n+ %s\n- %s\nCleanup: %s" % [
+	var m: Dictionary = c["melee"]
+	_detail.text = "%s the %s (%s): %s\nWeapon: %s   ·   Up close: %s   ·   Special: %s   ·   HP %d   ·   Speed %d\nGag: %s. %s\n+ %s\n- %s\nCleanup: %s" % [
 		c["name"], c["species"], c["role"], c["blurb"],
-		c["weapon"]["name"], sp["name"], c["hp"], c["speed"],
+		c["weapon"]["name"], m["name"], sp["name"], c["hp"], c["speed"],
 		g["name"], g["blurb"], c["strength"], c["weakness"], c["tidy_note"]]
 
 

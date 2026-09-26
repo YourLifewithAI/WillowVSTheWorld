@@ -13,7 +13,7 @@ extends CharacterBody2D
 ## draw a hidden character: invisible to enemies, ghostly to teammates, and
 ## visible to enemies who have a nose or x-ray vision nearby (Match.is_revealed).
 
-enum Action { ATTACK, SPECIAL, DASH, GAG }
+enum Action { ATTACK, SPECIAL, DASH, GAG, MELEE }
 ## How a character can be held by an enemy's gag.
 enum Capture { NONE, SWALLOWED, GRABBED }
 
@@ -25,6 +25,10 @@ const KNOCK_DECAY := 7.0
 const TUMBLE_SPEED := 140.0
 ## Body radius on the floor, used for hit checks.
 const BODY_RADIUS := 7.0
+## How long a knockup keeps you in the air (just a visual; the stun does the rest).
+const HOP_TIME := 0.5
+## After a close-up move, how long before your weapon can fire again.
+const MELEE_WEAPON_LOCK := 0.25
 ## Seconds of standing still before a sneaky cat disappears.
 const SNEAK_DELAY := 1.0
 ## Damage done to furniture by a character slamming into it.
@@ -81,6 +85,7 @@ var knock_vel := Vector2.ZERO
 var stun := 0.0
 var attack_cd := 0.0
 var special_cd := 0.0
+var melee_cd := 0.0
 var dash_cd := 0.0
 var buff_mult := 1.0
 var vanish_t := 0.0
@@ -117,6 +122,11 @@ var _stun_vis := 0.0
 var _flip_t := 0.0
 var _revealed := false
 var _showing_bone := false
+var _hop_t := 0.0
+var _hop_h := 0.0
+## A pounce in the air: the melee move to swing when it lands.
+var _pounce: Dictionary = {}
+var _pounce_ambush := false
 
 
 func setup(p_id: int, info: Dictionary, p_arena: Match) -> void:
@@ -225,6 +235,7 @@ func _gather_input() -> Dictionary:
 
 func _owner_tick(delta: float) -> void:
 	attack_cd = maxf(0.0, attack_cd - delta)
+	melee_cd = maxf(0.0, melee_cd - delta)
 	special_cd = maxf(0.0, special_cd - delta)
 	dash_cd = maxf(0.0, dash_cd - delta)
 	stun = maxf(0.0, stun - delta)
@@ -235,6 +246,7 @@ func _owner_tick(delta: float) -> void:
 		buff_mult = 1.0
 
 	if captured_by != 0:
+		_pounce = {}
 		_follow_captor()
 		return
 	if arena.phase == Match.Phase.WAR and not is_ko:
@@ -289,6 +301,8 @@ func _owner_tick(delta: float) -> void:
 	tumbling = knock_vel.length() > TUMBLE_SPEED
 	interacting = bool(inp["interact"]) and not is_ko and arena.can_move()
 	_update_stealth(delta)
+	if not _pounce.is_empty():
+		_resolve_pounce()
 
 	if not free_to_act:
 		return
@@ -302,7 +316,9 @@ func _owner_tick(delta: float) -> void:
 	if not at_war or carrying or _slam_t > 0.0:
 		return
 	var auto_fire: bool = inp.get("attack_held", false) and float(data["weapon"]["cooldown"]) < 0.2
-	if (inp["attack"] or auto_fire) and attack_cd <= 0.0:
+	if inp["interact_pressed"] and melee_cd <= 0.0:
+		_do_melee()
+	elif (inp["attack"] or auto_fire) and attack_cd <= 0.0:
 		_do_attack()
 	elif inp["special"] and special_cd <= 0.0:
 		_do_special()
@@ -394,6 +410,47 @@ func _do_attack() -> void:
 		_hit_arc(w, 2 if has_bone() else 0, ambush)
 	else:
 		_fire(0, w, ambush)
+
+
+## The right button (when you aren't carrying the remote): this character's
+## own close-up move (see "melee" in Roster).
+func _do_melee() -> void:
+	var m: Dictionary = data["melee"]
+	melee_cd = float(m["cooldown"])
+	# Swinging up close ties up your hands for a moment: no firing mid-swipe.
+	attack_cd = maxf(attack_cd, MELEE_WEAPON_LOCK)
+	var ambush := stealthed
+	_break_stealth(0.6)
+	_play_action.rpc(Action.MELEE, facing)
+	if m.get("effect", "") == "lunge":
+		# Hop forward first (a very short dash) and swipe where you land, or
+		# as soon as someone is right in front of you.
+		_dash_t = float(m["effect_value"]) / DASH_SPEED
+		_pounce = m
+		_pounce_ambush = ambush
+		return
+	_hit_arc(m, 3, ambush)
+
+
+func _resolve_pounce() -> void:
+	if stun > 0.0 or is_ko or arena.phase != Match.Phase.WAR:
+		_pounce = {}
+		return
+	if _dash_t > 0.0 and not _enemy_ahead(float(_pounce["range"]) * 0.5, float(_pounce["arc"]) * 0.5):
+		return
+	_dash_t = 0.0
+	_hit_arc(_pounce, 3, _pounce_ambush)
+	_pounce = {}
+
+
+func _enemy_ahead(reach: float, half_arc: float) -> bool:
+	for other: Player in arena.players.values():
+		if other.team == team or other.is_ko:
+			continue
+		var off := Iso.to_floor(other.position - position)
+		if off.length() <= reach + BODY_RADIUS and (off.length() < 4.0 or absf(rad_to_deg(facing.angle_to(off))) <= half_arc):
+			return true
+	return false
 
 
 func _do_gag() -> void:
@@ -509,7 +566,8 @@ func _land_slam() -> void:
 ## Reports every enemy, breakable and piece of furniture in a cone in front of us.
 func _hit_arc(w: Dictionary, ability: int, ambush: bool) -> void:
 	var reach: float = w["range"]
-	var half_arc: float = float(w["arc"]) * 0.5
+	# A full circle (Zoomba's spin) must include straight behind, despite rounding.
+	var half_arc: float = float(w["arc"]) * 0.5 + 0.01
 	for other: Player in arena.players.values():
 		if other.team == team or other.is_ko:
 			continue
@@ -520,10 +578,14 @@ func _hit_arc(w: Dictionary, ability: int, ambush: bool) -> void:
 		if d > 4.0 and absf(rad_to_deg(facing.angle_to(off))) > half_arc:
 			continue
 		arena.report_hit(self, other, ability, off.normalized() if d > 0.1 else facing, ambush)
+	# Some close-up moves are made for knocking things over.
+	var item_force := float(w["knock"])
+	if w.get("effect", "") == "shove_items":
+		item_force = maxf(item_force, float(w.get("effect_value", 0.0)))
 	for item in arena.level.mess_items:
 		var off := Iso.to_floor(item.position - position)
 		if off.length() <= reach + 6.0 and (off.length() < 4.0 or absf(rad_to_deg(facing.angle_to(off))) <= half_arc):
-			arena.report_mess_hit(item, w["knock"], off)
+			arena.report_mess_hit(item, item_force, off)
 	for f in arena.level.furniture:
 		var off := Iso.to_floor(f.position - position)
 		if f.can_be_damaged() and off.length() <= reach + f.reach() and absf(rad_to_deg(facing.angle_to(off))) <= half_arc:
@@ -579,6 +641,8 @@ func _play_action(action: int, dir: Vector2) -> void:
 			else:
 				_recoil = 1.0
 				_squash = 0.1
+		Action.MELEE:
+			_play_melee(dir)
 		Action.DASH:
 			_squash = 0.3
 			if not stealthed:
@@ -619,9 +683,54 @@ func _play_action(action: int, dir: Vector2) -> void:
 			Fx.text(fx_parent, position + Vector2(0, -sprite_height() - z - 6), String(sp["name"]).to_upper() + "!", Roster.TEAM_COLORS[team].lightened(0.3))
 
 
+## How each kind of close-up move looks (everyone sees it; the owner already did the hit).
+func _play_melee(dir: Vector2) -> void:
+	var m: Dictionary = data["melee"]
+	var fx_parent := arena.level.entities
+	var look := String(m.get("look", "swipe"))
+	var at := position + Vector2(0, -z - 6)
+	var ahead := at + Iso.to_screen(dir * float(m["range"]) * 0.7)
+	var col := Roster.TEAM_COLORS[team].lightened(0.4)
+	sound(m.get("sfx", "m_" + look))
+	_squash = 0.25
+	match look:
+		"swipe":  # Willow: the swipe itself lands with the pounce, so show the leap.
+			_squash = 0.45
+			Fx.slash(fx_parent, at + Iso.to_screen(dir * (float(m["range"]) + float(m.get("effect_value", 0.0)))), dir, Color.WHITE)
+		"knead":
+			Fx.burst(fx_parent, ahead, Color("ffc2d1"))
+			Fx.text(fx_parent, ahead + Vector2(0, -10), "purr", Color("ffc2d1"))
+		"chomp":
+			Fx.slash(fx_parent, ahead, dir, Color.WHITE)
+			Fx.text(fx_parent, ahead + Vector2(0, -8), "CHOMP!", Color.WHITE)
+		"peck":
+			Fx.burst(fx_parent, ahead, Color("ffd84d"))
+		"spin":
+			Fx.ring(fx_parent, position, float(m["range"]) + 4.0, Color(1, 1, 1, 0.8), false)
+			Fx.ring(fx_parent, position, float(m["range"]) * 0.6, col, false)
+		"flip":
+			_swing = 1.0
+			Fx.swing(fx_parent, at + Vector2(0, 6), dir, float(m["range"]) * 0.9, Color(1, 1, 1, 0.85))
+			Fx.text(fx_parent, ahead + Vector2(0, -8), "FLIP!", Color("ffd84d"))
+		"yoink":
+			Fx.slash(fx_parent, ahead, -dir, Color("ffd84d"))
+			Fx.text(fx_parent, ahead + Vector2(0, -8), "YOINK!", Color("ffd84d"))
+		"feedback":
+			Fx.ring(fx_parent, position + Iso.to_screen(dir * 6.0), float(m["range"]) + 6.0, Color("62f2ff"), false)
+			Fx.text(fx_parent, ahead + Vector2(0, -8), "SKREEE!", Color("62f2ff"))
+			for k in 3:
+				Fx.note(fx_parent, position + Iso.to_screen(dir.rotated(-0.6 + 0.6 * k) * 16.0))
+		_:
+			Fx.slash(fx_parent, ahead, dir, Color.WHITE)
+
+
 # ================================================= events from the host
 
-func on_damaged(new_hp: int, knock: Vector2, stun_time: float, ambushed: bool) -> void:
+## `hop`: how high a "knockup" close-up move pops you into the air (px).
+func on_damaged(new_hp: int, knock: Vector2, stun_time: float, ambushed: bool, hop: float = 0.0) -> void:
+	if hop > 0.0:
+		_hop_t = HOP_TIME
+		_hop_h = hop
 	sound("hit_big" if hp - new_hp >= 20 else "hit")
 	hp = new_hp
 	_flash = 0.15
@@ -708,6 +817,13 @@ func apply_pull(pull: Vector2) -> void:
 		knock_vel = knock_vel * 0.5 + pull
 
 
+## Healed by the host (a close-up move that drains health).
+func heal(new_hp: int) -> void:
+	if new_hp > hp:
+		Fx.text(arena.level.entities, position + Vector2(0, -sprite_height() - z - 4), "+%d" % (new_hp - hp), Color("8ff0a4"))
+	hp = new_hp
+
+
 func apply_buff(mult: float, duration: float, heal_to: int) -> void:
 	hp = heal_to
 	Fx.text(arena.level.entities, position + Vector2(0, -sprite_height() - z - 4), "+HYPE", Color("62f2ff"))
@@ -788,6 +904,9 @@ func _process(delta: float) -> void:
 			tint.a = 0.35
 		_sprite.modulate = tint
 	_sprite.scale = Vector2(sx, sy)
+	if _hop_t > 0.0:
+		_hop_t = maxf(0.0, _hop_t - delta)
+		bob -= sin(_hop_t / HOP_TIME * PI) * _hop_h
 	_visual.position = Vector2(0, round(-z + bob))
 	_update_weapon()
 

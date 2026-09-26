@@ -79,6 +79,15 @@ if grep -q "FAIL  couch:" "$OUT/couch.log" || ! grep -q "^\[couch\] [0-9]* passe
   FAILED=1
 fi
 
+echo "== Close-up moves: every character's, and what each one does"
+"$GODOT" --headless --fixed-fps 60 --path "$GAME" res://tests/melee_test.tscn -- --war=120 \
+  > "$OUT/melee.log" 2>&1
+no_script_errors "$OUT/melee.log" "melee"
+grep -E "^  (PASS|FAIL)  melee:" "$OUT/melee.log"
+if grep -q "FAIL  melee:" "$OUT/melee.log" || ! grep -q "^\[melee\] [0-9]* passed, 0 failed" "$OUT/melee.log"; then
+  FAILED=1
+fi
+
 echo "== Network match (host with a guest on its screen + a client, over localhost, real time, ~70s)"
 "$GODOT" --headless --path "$GAME" -- --host --name=Host --map=farmhouse --bots=2 --guests=1 --autostart=2 --autopilot \
   --war=30 --cleanup=15 --quit-after=62 > "$OUT/host.log" 2>&1 &

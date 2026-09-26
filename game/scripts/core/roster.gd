@@ -19,6 +19,16 @@ extends RefCounted
 ## weapon. "voice" picks the character's hello / KO noises (hi_<voice>, ko_<voice>),
 ## pitched by "voice_pitch". All of them are names in res://assets/sounds.
 ##
+## Close-up moves ("melee", ability index 3, the right button when you aren't
+## carrying the remote): a swing in a cone (range, arc) with an optional effect:
+##   lunge        hop effect_value px forward first, then swing where you land
+##   drain        heal yourself for effect_value x the damage dealt
+##   steal        take the remote from the carrier you hit
+##   shove_items  knock things over with effect_value force (200+ topples heavy ones)
+##   knockup      pop the target effect_value px into the air (use "stun" for the daze)
+##   pull         yank the target toward you instead of away
+## "look" picks the swing's visuals and its sound (m_<look>).
+##
 ## Gags are each character's big silly move. They charge up during the war
 ## (faster when you land hits) and play to that character's strengths.
 ##
@@ -58,6 +68,9 @@ const CHARACTERS := {
 			"hit_radius": 5.0, "look": "laser", "demolition": 8.0, "sfx": "laser",
 			"sprite": "w_laser", "hold": Vector2(8, -5)},
 		"special": {"name": "Vanish", "kind": Special.VANISH, "cooldown": 9.0, "duration": 4.0, "sfx": "poof"},
+		"melee": {"name": "Pounce", "damage": 12, "knock": 90.0, "stun": 0.0, "range": 18.0, "arc": 90.0,
+			"cooldown": 1.4, "demolition": 6.0, "effect": "lunge", "effect_value": 28.0, "look": "swipe",
+			"blurb": "Wiggle, hop forward and swipe. Catches runaway carriers, and hits twice as hard from hiding."},
 		"gag": {"name": "Litter Bomb", "kind": Gag.LITTER, "speed": 200.0, "range": 110.0, "arc": 30.0,
 			"explode_radius": 18.0, "damage": 10, "knock": 150.0, "demolition": 20.0, "look": "litter",
 			"sfx": "lob", "cloud_radius": 46.0, "cloud_time": 7.0,
@@ -79,6 +92,9 @@ const CHARACTERS := {
 		"special": {"name": "Belly Flop", "kind": Special.SLAM, "cooldown": 6.0, "damage": 24,
 			"radius": 46.0, "knock": 320.0, "stun": 0.4, "windup": 0.35, "rise": 16.0, "demolition": 80.0,
 			"sfx": "jump", "land_sfx": "slam"},
+		"melee": {"name": "Making Biscuits", "damage": 6, "knock": 30.0, "stun": 0.0, "range": 18.0, "arc": 110.0,
+			"cooldown": 0.5, "demolition": 15.0, "effect": "drain", "effect_value": 0.5, "look": "knead",
+			"blurb": "Knead whoever is in front, purring. Every knead heals her for half the damage (and shreds the couch)."},
 		"gag": {"name": "Litter Bomb", "kind": Gag.LITTER, "speed": 200.0, "range": 110.0, "arc": 30.0,
 			"explode_radius": 18.0, "damage": 10, "knock": 150.0, "demolition": 20.0, "look": "litter",
 			"sfx": "lob", "cloud_radius": 58.0, "cloud_time": 7.0,
@@ -101,6 +117,9 @@ const CHARACTERS := {
 		"special": {"name": "Big Bark", "kind": Special.PROJECTILE, "cooldown": 5.0, "damage": 8,
 			"knock": 260.0, "stun": 0.8, "count": 1, "spread": 0.0, "speed": 240.0,
 			"range": 150.0, "hit_radius": 16.0, "look": "bark", "pierce": true, "demolition": 20.0, "sfx": "bark"},
+		"melee": {"name": "Gimme!", "damage": 5, "knock": 50.0, "stun": 0.0, "range": 18.0, "arc": 70.0,
+			"cooldown": 2.0, "demolition": 0.0, "effect": "steal", "effect_value": 0.0, "look": "chomp",
+			"blurb": "A quick bite that snatches the remote right out of the carrier's hands."},
 		"gag": {"name": "Big Bone", "kind": Gag.BONE, "duration": 8.0, "damage": 22, "knock": 420.0,
 			"range": 30.0, "arc": 170.0, "cooldown": 0.45, "demolition": 60.0, "sfx": "tada", "swing_sfx": "whoosh",
 			"sprite": "w_bone", "hold": Vector2(0, 2),
@@ -120,6 +139,9 @@ const CHARACTERS := {
 		"special": {"name": "Feather Flurry", "kind": Special.PROJECTILE, "cooldown": 3.5, "damage": 9,
 			"knock": 110.0, "stun": 0.0, "count": 3, "spread": 36.0, "speed": 280.0,
 			"range": 170.0, "hit_radius": 8.0, "look": "feather", "pierce": false, "demolition": 6.0, "sfx": "feathers"},
+		"melee": {"name": "Peck Peck Peck", "damage": 3, "knock": 20.0, "stun": 0.0, "range": 16.0, "arc": 60.0,
+			"cooldown": 0.18, "demolition": 2.0, "effect": "shove_items", "effect_value": 260.0, "look": "peck",
+			"blurb": "Mash it. Tiny pecks that keep interrupting a carrier, and topple even the heavy shelves."},
 		"gag": {"name": "Flock Call", "kind": Gag.FLOCK, "damage": 14, "knock": 260.0, "length": 280.0,
 			"width": 34.0, "speed_mult": 1.6, "duration": 3.5, "sfx": "flock",
 			"blurb": "Calls in the whole flock. A stampede of budgies sweeps the room, bowling everyone over, and Kiwi rides along at top speed."},
@@ -140,6 +162,9 @@ const CHARACTERS := {
 			"sprite": "w_dustcannon", "hold": Vector2(-2, -10)},
 		"special": {"name": "Turbo Suck", "kind": Special.PULL, "cooldown": 5.0, "damage": 6,
 			"radius": 90.0, "knock": 230.0, "stun": 0.4, "sfx": "suck"},
+		"melee": {"name": "Spot Clean", "damage": 8, "knock": 170.0, "stun": 0.0, "range": 20.0, "arc": 360.0,
+			"cooldown": 1.5, "demolition": 0.0, "effect": "", "effect_value": 0.0, "look": "spin",
+			"blurb": "Spin in place and fling everyone around you away. No aiming needed (great from under the couch)."},
 		"gag": {"name": "Mega Suck", "kind": Gag.MEGA_SUCK, "duration": 3.0, "radius": 110.0, "pull": 260.0,
 			"swallow_time": 2.0, "damage": 18, "knock": 380.0, "stun": 0.5, "sfx": "vacuum",
 			"blurb": "Maximum suction. Drags everyone nearby in and swallows anyone who gets too close, remote and all, then spits them across the room."},
@@ -160,6 +185,9 @@ const CHARACTERS := {
 		"special": {"name": "Rocket Fist", "kind": Special.PROJECTILE, "cooldown": 5.0, "damage": 22,
 			"knock": 300.0, "stun": 0.3, "count": 1, "spread": 0.0, "speed": 300.0,
 			"range": 220.0, "hit_radius": 9.0, "look": "rocket_fist", "pierce": false, "demolition": 60.0, "sfx": "rocket"},
+		"melee": {"name": "Spatula Flip", "damage": 8, "knock": 30.0, "stun": 0.6, "range": 20.0, "arc": 90.0,
+			"cooldown": 3.5, "demolition": 0.0, "effect": "knockup", "effect_value": 20.0, "look": "flip",
+			"blurb": "Flips whoever is in front into the air like a pancake: helpless for a moment."},
 		"gag": {"name": "Satellite Laser", "kind": Gag.SATELLITE, "delay": 1.2, "radius": 38.0, "damage": 40,
 			"knock": 320.0, "stun": 0.4, "demolition": 150.0, "reach": 150.0, "scan": 6.0,
 			"blurb": "Calls down an orbital laser on the nearest enemy (or straight ahead). The satellite also scans the house: every hidden pet shows up for the whole robot team."},
@@ -178,6 +206,9 @@ const CHARACTERS := {
 		"special": {"name": "Claw Drop", "kind": Special.SLAM, "cooldown": 5.5, "damage": 24,
 			"radius": 34.0, "knock": 180.0, "stun": 0.9, "windup": 0.45, "rise": -34.0, "demolition": 60.0,
 			"sfx": "servo", "land_sfx": "clank"},
+		"melee": {"name": "Yoink!", "damage": 6, "knock": 190.0, "stun": 0.3, "range": 26.0, "arc": 60.0,
+			"cooldown": 2.2, "demolition": 0.0, "effect": "pull", "effect_value": 0.0, "look": "yoink",
+			"blurb": "Grabs whoever is in front and reels them in under the claw, dazed."},
 		"gag": {"name": "Claw Machine", "kind": Gag.CLAW_MACHINE, "radius": 40.0, "hold": 3.0, "damage": 20,
 			"knock": 120.0, "stun": 1.0, "sfx": "claw_machine",
 			"blurb": "Just like the arcade: grabs whoever is underneath and carries them around the ceiling. If they had the remote, it's the Claw's now."},
@@ -197,6 +228,9 @@ const CHARACTERS := {
 			"sfx": "sub"},
 		"special": {"name": "Hype Track", "kind": Special.AURA, "cooldown": 8.0, "radius": 75.0,
 			"heal": 30, "speed_mult": 1.35, "duration": 3.0, "sfx": "hype"},
+		"melee": {"name": "Feedback", "damage": 4, "knock": 330.0, "stun": 0.0, "range": 22.0, "arc": 150.0,
+			"cooldown": 2.5, "demolition": 10.0, "effect": "", "effect_value": 0.0, "look": "feedback",
+			"blurb": "An ear-splitting squeal that blasts everyone in front far away (shelves too)."},
 		"gag": {"name": "Dance Party", "kind": Gag.DANCE, "radius": 110.0, "duration": 2.8, "heal": 25, "sfx": "disco",
 			"blurb": "Drops the beat so hard that every enemy nearby has to dance. Allies on the dance floor heal up."},
 		"strength": "Cleaning Playlist: during cleanup, everyone near Bass tidies 30% faster. Its bass waves go straight through furniture.",
@@ -223,11 +257,13 @@ static func texture(sprite_name: String) -> Texture2D:
 	return load("res://assets/sprites/%s.png" % sprite_name) as Texture2D
 
 
-## The weapon (ability 0), special (1) or gag (2) of a character.
+## The weapon (ability 0), special (1), gag (2) or melee move (3) of a character.
 static func ability(data: Dictionary, which: int) -> Dictionary:
 	match which:
 		0:
 			return data["weapon"]
 		1:
 			return data["special"]
+		3:
+			return data["melee"]
 	return data["gag"]

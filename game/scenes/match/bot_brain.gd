@@ -85,7 +85,15 @@ func _war(inp: Dictionary, delta: float) -> void:
 			inp["attack_held"] = true
 			if float(w["cooldown"]) >= 0.2:
 				_hesitate = randf_range(0.05, 0.25)
-	if not me.carrying and me.special_cd <= 0.0 and _special_makes_sense(foe, dist, to_foe):
+	# Right up close: use this character's own close-up move.
+	var m: Dictionary = me.data["melee"]
+	var reach := float(m["range"]) + (float(m["effect_value"]) if m.get("effect", "") == "lunge" else 0.0)
+	if not me.carrying and me.melee_cd <= 0.0 and dist <= reach + 4.0 \
+			and (float(m["arc"]) >= 360.0 or absf(rad_to_deg(me.facing.angle_to(to_foe))) < float(m["arc"]) * 0.5) \
+			and _melee_makes_sense(m, foe):
+		inp["interact_pressed"] = true
+		_hesitate = randf_range(0.05, 0.2)
+	elif not me.carrying and me.special_cd <= 0.0 and _special_makes_sense(foe, dist, to_foe):
 		inp["special"] = true
 		_hesitate = 0.3
 	elif not me.carrying and me.gag_charge >= 1.0 and _gag_makes_sense(foe, dist, to_foe):
@@ -148,6 +156,19 @@ func _special_makes_sense(foe: Player, dist: float, to_foe: Vector2) -> bool:
 		Roster.Special.AURA:
 			return me.hp < me.max_hp * 0.7 or dist < 60.0
 	return false
+
+
+## Some close-up moves are for special moments rather than every brawl.
+func _melee_makes_sense(m: Dictionary, foe: Player) -> bool:
+	var foe_has_remote := foe.carrying
+	match String(m.get("effect", "")):
+		"steal":
+			return foe_has_remote
+		"lunge":
+			return foe_has_remote or me.stealthed or randf() < 0.3
+		"shove_items":
+			return foe_has_remote or randf() < 0.1
+	return true
 
 
 func _gag_makes_sense(foe: Player, dist: float, to_foe: Vector2) -> bool:

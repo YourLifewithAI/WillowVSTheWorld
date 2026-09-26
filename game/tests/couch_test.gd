@@ -227,6 +227,17 @@ func _run() -> void:
 	p1_char.attack_cd = 0.0
 	await tap(PAIR, Seats.B_SOUTH)
 	check(p1_char.attack_cd > 0.0, "P1's left button (B) attacks")
+	# The right button, when you aren't carrying the remote: your close-up move.
+	var p2_target: Player = locals[1]
+	p1_char.facing = Vector2.RIGHT
+	p2_target.position = p1_char.position + Iso.to_screen(Vector2(10, 0))
+	p2_target.invuln = 0.0
+	p1_char.melee_cd = 0.0
+	var hp_before := p2_target.hp
+	await tap(PAIR, Seats.B_NORTH)
+	await frames(4)
+	check(p1_char.melee_cd > 0.0 and p2_target.hp < hp_before,
+		"P1's right button does their close-up move (%s): P2 %d -> %d HP" % [p1_char.data["melee"]["name"], hp_before, p2_target.hp])
 	# A tap that's over before the game looks still counts, exactly once.
 	var p2_char: Player = locals[1]
 	p2_char.dash_cd = 0.0

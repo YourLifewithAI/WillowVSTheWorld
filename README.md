@@ -41,19 +41,19 @@ The full design (rules, roster, homes, art direction, networking, roadmap) is in
 Everyone gets a ridiculous weapon, one big strength and one real weakness. The
 pets are sneaky and chaotic, the robots have sensors and are great at repairs.
 
-| Team Pets | Weapon | + Strength | - Weakness |
-|---|---|---|---|
-| **Willow**, tabby cat | Laser Pointer Blaster | Invisible when still; *Vanish*; double-damage ambushes | Fragile |
-| **Biscuit**, chonky cat | Catnip Bazooka | Heavy (half knockback), sneaky | Slow |
-| **Pepper**, pup | Tennis Ball Gatling | Nose sniffs out hidden enemies | Butterfingers: drops the remote when hit |
-| **Kiwi**, budgie | Egg Bombs | Flies over furniture | Featherweight |
+| Team Pets | Weapon | Up close | + Strength | - Weakness |
+|---|---|---|---|---|
+| **Willow**, tabby cat | Laser Pointer Blaster | **Pounce**: hop forward and swipe | Invisible when still; *Vanish*; double-damage ambushes | Fragile |
+| **Biscuit**, chonky cat | Catnip Bazooka | **Making Biscuits**: kneads you, heals herself | Heavy (half knockback), sneaky | Slow |
+| **Pepper**, pup | Tennis Ball Gatling | **Gimme!**: a bite that steals the remote | Nose sniffs out hidden enemies | Butterfingers: drops the remote when hit |
+| **Kiwi**, budgie | Egg Bombs | **Peck Peck Peck**: mash it; topples even shelves | Flies over furniture | Featherweight |
 
-| Team Robots | Weapon | + Strength | - Weakness |
-|---|---|---|---|
-| **Zoomba**, robot vacuum | Dust Cannon | Hides under furniture for ambushes | Flips over when hit hard |
-| **Unit-7**, helper bot | Toaster Cannon | X-ray vision; rebuilds twice as fast | Clunky |
-| **The Claw**, ceiling gantry | Wrecking Ball | Rides the ceiling; lifts heavy things alone | Long reboot after a KO |
-| **Bass**, smart speaker | Subwoofer Cannon | Cleaning playlist speeds up the team's tidying | No legs: tiny dash |
+| Team Robots | Weapon | Up close | + Strength | - Weakness |
+|---|---|---|---|---|
+| **Zoomba**, robot vacuum | Dust Cannon | **Spot Clean**: spins, flinging everyone around it | Hides under furniture for ambushes | Flips over when hit hard |
+| **Unit-7**, helper bot | Toaster Cannon | **Spatula Flip**: flips you into the air, stunned | X-ray vision; rebuilds twice as fast | Clunky |
+| **The Claw**, ceiling gantry | Wrecking Ball | **Yoink!**: reels you in under the claw | Rides the ceiling; lifts heavy things alone | Long reboot after a KO |
+| **Bass**, smart speaker | Subwoofer Cannon | **Feedback**: a squeal that blasts you away | Cleaning playlist speeds up the team's tidying | No legs: tiny dash |
 
 Everyone also has a **gag**: a big, silly, charge-up move themed on what they are,
 which also plays to their strengths:
@@ -97,7 +97,7 @@ add or remove them in the lobby.
 | Attack (hold for automatic weapons) | J | left button | left face button (Xbox X, Switch Y) |
 | Special | K | top button | top face button (Xbox Y, Switch X) |
 | Dash | Space | bottom button | bottom face button (Xbox A, Switch B) |
-| Throw the remote / hold to tidy | E | right button | right face button (Xbox B, Switch A) |
+| Up close move / throw the remote / hold to tidy | E | right button | right face button (Xbox B, Switch A) |
 | Gag (when the meter is full) | I or Q | SL or SR | a shoulder button or trigger |
 | Menu (pauses in Practice) | Esc | + or - | Start or Back |
 | Fullscreen on/off | F11 or Alt+Enter | | |
@@ -193,7 +193,9 @@ tools/smoke_test.sh path/to/godot
 Runs headless (no window): imports the project, checks that every sound the game
 asks for exists, plays a full 3v3 bot match on every home at top speed (checking the
 phase sounds and music fire), then plays a real host + client network match over
-localhost and checks that both machines agree on the map and the result. Takes
+localhost and checks that both machines agree on the map and the result. Two
+scripted tests run too: `tests/couch_test.gd` (shared screen, with fake Joy-Cons) and
+`tests/melee_test.gd` (every character's close-up move, and what each one does). Takes
 about a minute and a half. The same
 checks run on GitHub for every push (`.github/workflows/smoke-test.yml`).
 
