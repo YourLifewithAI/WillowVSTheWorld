@@ -18,8 +18,6 @@ const KNOCK_DECAY := 7.0
 const TUMBLE_SPEED := 140.0
 ## Body radius on the floor, used for hit checks.
 const BODY_RADIUS := 7.0
-## Height of the ceiling above the floor, in pixels (matches the room's walls).
-const CEILING := 70.0
 
 var pid := 0
 var char_id := "willow"
@@ -486,7 +484,7 @@ func _draw() -> void:
 	# The Claw hangs from a cable on a trolley that rides the ceiling rails.
 	if char_id == "claw" and not is_ko:
 		var top := Vector2(0, round(-z) - sprite_height() + 2)
-		var ceiling := Vector2(0, -CEILING)
+		var ceiling := Vector2(0, -arena.level.room.wall_height - 6.0)
 		draw_line(top, ceiling, Color("3b4150"), 1.0)
 		draw_rect(Rect2(ceiling + Vector2(-5, -3), Vector2(10, 3)), Color("3b4150"))
 		draw_rect(Rect2(ceiling + Vector2(-4, -2), Vector2(8, 1)), Color("ffc93c"))

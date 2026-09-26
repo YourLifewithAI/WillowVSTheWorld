@@ -1,6 +1,6 @@
 # Willow VS The World: Game Design Document
 
-*Living document. Version 0.1, the first playable prototype.*
+*Living document. Version 0.2: the first playable prototype, now with four homes.*
 
 ## The pitch
 
@@ -142,6 +142,48 @@ Ideas waiting in the wings: a hamster in a ball, a goldfish in a rolling bowl,
 a smart fridge (immobile turret?), a drone, a robot lawnmower that only works
 in the garden map.
 
+## The homes (maps)
+
+Every map is a different kind of home, and the home shapes the fight: how far
+the runs are, where the chokepoints are, how much stuff there is to break.
+
+| Home | Size | Best for | What makes it different |
+|---|---|---|---|
+| **The Living Room** | 16x16, one room | 4-6 | The classic. Open, symmetric, easy to read. Armchairs give cover on the lanes. |
+| **Studio Apartment** | 12x12, one room | 2-4 | Bed, desk and kitchenette crammed together. Short runs, constant brawling, a milk jug that has escaped the fridge. War 2:30, cleanup 0:35. |
+| **The Farmhouse** | 18x16, one big room | 4-6 | Wood stove, farm table with benches that split the pets' lane, muddy boots by the door, a pie on the floor. Cleanup 0:50. |
+| **Suburban House** | 22x14, three rooms | 6-8 | Kitchen, living room and den divided by knee-walls with doorways. The pets hold the kitchen, the robots hold the den. Long runs; passing matters. War 3:30, cleanup 0:55. |
+
+**Design rules for a home:**
+
+- **Mirror the important stuff.** Bases sit in opposite corners, the same distance
+  from the remote. Decoration can be asymmetric, but lanes and cover should be fair.
+- **Put breakables in the lanes.** Items along the walls rarely get knocked over;
+  the mess comes from what's in the path of the fighting.
+- **Everyone can reach everything.** Bots use a navigation mesh baked from the
+  furniture, so if they can't find a path, players will feel it too.
+- **Each home tells a story in its props:** the studio's guitar and laundry pile,
+  the farmhouse's boots and pie, the suburbs' toy blocks and bean bags.
+
+**Homes to build next:** a beach house (sand gets everywhere and counts as mess),
+a city loft with a spiral staircase, a log cabin in the snow, a mansion with way too
+many vases, a trailer (the smallest map yet), grandma's house (the plastic-covered
+couch can't be touched), a college dorm, a houseboat that rocks, and a
+smart-home-of-the-future where the robots have home advantage.
+
+**Making a new home** (about an hour in the editor):
+
+1. Duplicate `game/scenes/maps/living_room.tscn`.
+2. Select **Room** and set its size, floor style, wall colours, windows and doors
+   in the inspector.
+3. Move the `PetsBase`, `RobotsBase` and `RemoteHome` markers, and arrange
+   **Furniture** and **MessItem** nodes under `Entities`. Use **FloorZone**
+   nodes for kitchens, carpets and rugs.
+4. Add an entry to `game/scripts/core/maps.gd` (name, blurb, scene, and any
+   timing overrides) and add its id to `ORDER`.
+5. Run `tools/smoke_test.sh` after adding the map name to `MAPS` in the script.
+   It plays a bot match on every home and fails if nobody manages to score.
+
 ## Controls
 
 | Action | Keyboard | Gamepad |
@@ -207,7 +249,8 @@ game/
   scripts/core/                 Iso (projection maths), Roster (balance sheet), UiTheme
   scripts/autoload/net.gd       connections, lobby roster, launch options
   scenes/menu/                  main menu, lobby
-  scenes/level/                 the living room and its building blocks
+  scenes/level/                 building blocks: Room, Furniture, MessItem, BaseZone, FloorZone
+  scenes/maps/                  the homes (one scene each)
   scenes/match/                 match rules, players, bots, remote, HUD, effects
   assets/sprites/               PNGs (placeholder art)
 tools/make_sprites.py           regenerate placeholder sprites
@@ -252,7 +295,7 @@ needs tuning against **human** playtests.
 | **M0: Prototype** (this) | Full loop playable vs bots and over LAN: war, KOs, mess, cleanup, verdict. |
 | **M1: Feel** | Sound and music, hit-stop, screen shake, squash-and-stretch animation frames, controller rumble, a juicier whistle moment (car headlights sweep the room). |
 | **M2: Real art** | Animated character sprites, furniture sprites, UI art, a pixel font, a title screen. |
-| **M3: Content** | More rooms (kitchen, hallway, backyard), 2 more characters per side, room events (the doorbell, a delivery drone, the cat flap). |
+| **M3: Content** | More homes (see the list above), a backyard, 2 more characters per side, home events (the doorbell, a delivery drone, the cat flap, the smart home's lights turning off). |
 | **M4: Online** | Internet play without port forwarding (relay or Steam/Epic networking), invite codes, reconnects, lag compensation for hits. |
 | **M5: Couch mode** | Several players on one screen with gamepads. It's a cozy game; this is where it will shine. |
 | **M6: Ship** | Steam page, demo, festival builds. |

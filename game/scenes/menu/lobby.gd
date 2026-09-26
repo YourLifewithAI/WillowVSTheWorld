@@ -6,6 +6,8 @@ var _info: Label
 var _start: Button
 var _char_buttons: Dictionary = {}
 var _detail: Label
+var _map_pick: OptionButton
+var _map_label: Label
 
 
 func _ready() -> void:
@@ -44,6 +46,19 @@ func _build() -> void:
 	_players_box = VBoxContainer.new()
 	_players_box.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	lcol.add_child(_players_box)
+	var map_row := HBoxContainer.new()
+	map_row.add_child(UiTheme.label("Home:", 10))
+	if Net.is_host():
+		_map_pick = OptionButton.new()
+		_map_pick.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		for id in Maps.ORDER:
+			_map_pick.add_item(Maps.get_map(id)["name"])
+		_map_pick.item_selected.connect(func(k: int) -> void: Net.set_map(Maps.ORDER[k]))
+		map_row.add_child(_map_pick)
+	else:
+		_map_label = UiTheme.label("", 10, UiTheme.COCOA)
+		map_row.add_child(_map_label)
+	lcol.add_child(map_row)
 	if Net.is_host():
 		var bot_row := HBoxContainer.new()
 		for team in [Roster.Team.PETS, Roster.Team.ROBOTS]:
@@ -148,12 +163,17 @@ func _refresh() -> void:
 			_players_box.add_child(row)
 	for id: String in _char_buttons:
 		_char_buttons[id].button_pressed = id == Net.local_char
+	var map: Dictionary = Maps.get_map(Net.map_id)
+	if _map_pick:
+		_map_pick.select(Maps.ORDER.find(Net.map_id))
+	if _map_label:
+		_map_label.text = map["name"]
 	var counts := Net.team_counts()
 	if Net.is_host():
 		var where := "Practice mode (offline)." if not Net.online else "Friends can join at %s  (port %d)." % [", ".join(Net.local_addresses()) if not Net.local_addresses().is_empty() else "your IP", Net.DEFAULT_PORT]
-		_info.text = "%s  Pets %d vs Robots %d." % [where, counts[0], counts[1]]
+		_info.text = "%s  Pets %d vs Robots %d.\n%s: %s (best with %s)" % [where, counts[0], counts[1], map["name"], map["blurb"], map["players"]]
 		_start.disabled = not Net.can_start()
 		if _start.disabled:
 			_info.text += "  Each side needs at least one player (add a bot!)."
 	else:
-		_info.text = "Pets %d vs Robots %d. Waiting for the host to start..." % [counts[0], counts[1]]
+		_info.text = "Pets %d vs Robots %d. Waiting for the host to start...\n%s: %s" % [counts[0], counts[1], map["name"], map["blurb"]]

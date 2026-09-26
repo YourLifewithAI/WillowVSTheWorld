@@ -26,19 +26,24 @@ echo "== Import"
 "$GODOT" --headless --path "$GAME" --import > "$OUT/import.log" 2>&1
 no_script_errors "$OUT/import.log" "import"
 
-echo "== Practice match (3v3 bots, simulated as fast as possible)"
-"$GODOT" --headless --path "$GAME" --fixed-fps 60 -- \
-  --practice --bots=5 --autostart=1 --autopilot --war=60 --cleanup=30 --quit-after=110 \
-  > "$OUT/practice.log" 2>&1
-no_script_errors "$OUT/practice.log" "practice"
-for step in "phase WAR" "phase WHISTLE" "phase CLEANUP" "results tidy="; do
-  if grep -q "$step" "$OUT/practice.log"; then pass "practice reached '$step'"; else fail "practice never reached '$step'"; fi
+MAPS="living_room studio farmhouse suburbs"
+for MAP in $MAPS; do
+  echo "== Practice match on $MAP (3v3 bots, simulated as fast as possible)"
+  LOG="$OUT/practice_$MAP.log"
+  "$GODOT" --headless --path "$GAME" --fixed-fps 60 -- \
+    --practice --map="$MAP" --bots=5 --autostart=1 --autopilot --war=90 --cleanup=30 --quit-after=140 \
+    > "$LOG" 2>&1
+  no_script_errors "$LOG" "$MAP"
+  for step in "map $MAP" "phase WAR" "phase WHISTLE" "phase CLEANUP" "results tidy="; do
+    if grep -q "$step" "$LOG"; then pass "$MAP reached '$step'"; else fail "$MAP never reached '$step'"; fi
+  done
+  if grep -q "] ko " "$LOG"; then pass "$MAP had KOs"; else fail "$MAP had no KOs"; fi
+  if grep -q "] knocked " "$LOG"; then pass "$MAP made a mess"; else fail "$MAP: nothing got knocked over"; fi
+  if grep -q "score team=" "$LOG"; then pass "$MAP: bots found their way to a base"; else fail "$MAP: nobody scored (bots stuck?)"; fi
 done
-if grep -q "] ko " "$OUT/practice.log"; then pass "practice had KOs"; else fail "practice had no KOs"; fi
-if grep -q "] knocked " "$OUT/practice.log"; then pass "practice made a mess"; else fail "practice knocked nothing over"; fi
 
 echo "== Network match (host + client over localhost, real time, ~70s)"
-"$GODOT" --headless --path "$GAME" -- --host --name=Host --bots=2 --autostart=2 --autopilot \
+"$GODOT" --headless --path "$GAME" -- --host --name=Host --map=farmhouse --bots=2 --autostart=2 --autopilot \
   --war=30 --cleanup=15 --quit-after=62 > "$OUT/host.log" 2>&1 &
 HOST_PID=$!
 sleep 3
@@ -47,6 +52,7 @@ sleep 3
 wait $HOST_PID
 no_script_errors "$OUT/host.log" "host"
 no_script_errors "$OUT/client.log" "client"
+if grep -q "map farmhouse" "$OUT/client.log"; then pass "the client loaded the host's map"; else fail "the client didn't load the host's map"; fi
 HOST_RESULT="$(grep -o 'results tidy=.*' "$OUT/host.log" | head -1)"
 CLIENT_RESULT="$(grep -o 'results tidy=.*' "$OUT/client.log" | head -1)"
 if [ -n "$HOST_RESULT" ] && [ "$HOST_RESULT" = "$CLIENT_RESULT" ]; then

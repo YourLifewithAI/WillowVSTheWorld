@@ -34,8 +34,10 @@ static var current: Match
 @export var countdown_time := 3.0
 @export var whistle_time := 3.0
 
-@onready var level: Level = $World/SubViewport/LivingRoom
 @onready var hud: Hud = $HUD
+
+var level: Level
+var map_info: Dictionary = {}
 
 var players: Dictionary = {}  # pid -> Player
 var phase: Phase = Phase.LOADING
@@ -60,6 +62,14 @@ var _load_timeout := 8.0
 
 func _ready() -> void:
 	current = self
+	map_info = Maps.get_map(Net.map_id)
+	level = load(map_info["scene"]).instantiate()
+	var world: SubViewport = $World/SubViewport
+	world.add_child(level)
+	level.position = level.centered_position(Vector2(world.size))
+	war_time = map_info.get("war_time", war_time)
+	cleanup_time = map_info.get("cleanup_time", cleanup_time)
+	capture_limit = map_info.get("capture_limit", capture_limit)
 	if Net.options.has("war"):
 		war_time = float(Net.options["war"])
 	if Net.options.has("cleanup"):
@@ -72,6 +82,7 @@ func _ready() -> void:
 	remote.position = remote.home
 	level.entities.add_child(remote)
 	hud.setup(self)
+	log_event("map %s" % Net.map_id)
 	multiplayer.peer_disconnected.connect(_on_peer_disconnected)
 	if multiplayer.is_server():
 		_loaded[1] = true

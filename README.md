@@ -20,7 +20,19 @@ everybody is grounded.
 |---|---|
 | ![Lobby: pick Team Pets or Team Robots](docs/images/lobby.png) | ![Cleanup phase with the tidiness meter](docs/images/cleanup.png) |
 
-The full design (rules, roster, art direction, networking, roadmap) is in
+### The homes
+
+Pick where the fight happens in the lobby. Each home plays differently.
+
+| Studio Apartment | The Farmhouse | Suburban House |
+|---|---|---|
+| ![Studio apartment map](docs/images/map_studio.png) | ![Farmhouse map](docs/images/map_farmhouse.png) | ![Suburban house map](docs/images/map_suburbs.png) |
+| Tiny, cramped, constant brawling. 2-4 players. | Wood stove, farm table, a pie on the floor. 4-6 players. | Kitchen, living room and den behind knee-walls. 6-8 players. |
+
+...plus **The Living Room**, the original. The design doc has a list of homes
+to build next and a step-by-step guide to making your own.
+
+The full design (rules, roster, homes, art direction, networking, roadmap) is in
 **[docs/GAME_DESIGN.md](docs/GAME_DESIGN.md)**.
 
 ## The characters
@@ -70,7 +82,8 @@ add or remove them in the lobby.
 
 ```
 game/                     the Godot project (open game/project.godot)
-  scenes/level/           the living room: drag furniture around in living_room.tscn
+  scenes/maps/            the homes: open one and drag furniture around
+  scenes/level/           the building blocks every home is made of
   scenes/match/           rules (match.gd), characters (player.gd), bots, HUD
   scripts/core/roster.gd  every character's stats and moves (the balance sheet)
   assets/sprites/         pixel art (placeholders)
@@ -81,8 +94,9 @@ tools/smoke_test.sh       headless end-to-end tests
 
 - **Tweak balance** in `game/scripts/core/roster.gd` and the `@export` values on
   the `Match` node (war/cleanup length, capture limit, respawn time).
-- **Rearrange the room** by opening `game/scenes/level/living_room.tscn`. The
-  furniture draws itself right in the editor; change its size and colours in the inspector.
+- **Rearrange a home** by opening its scene in `game/scenes/maps/`. The room and
+  furniture draw themselves right in the editor; change sizes, colours, windows and
+  doors in the inspector. To add a new home, see *Making a new home* in the design doc.
 - **Replace the art:** drop a PNG with the same name into `game/assets/sprites/`
   (for example `willow.png`). Characters face right, and the bottom of the image
   is where they touch the floor. [Aseprite](https://www.aseprite.org) is the go-to
@@ -95,13 +109,14 @@ tools/smoke_test.sh       headless end-to-end tests
 tools/smoke_test.sh path/to/godot
 ```
 
-Runs headless (no window): imports the project, plays a full 3v3 bot match at
-top speed, then plays a real host + client network match over localhost and
-checks that both machines agree on the result. Takes about a minute. The same
+Runs headless (no window): imports the project, plays a full 3v3 bot match on
+every home at top speed, then plays a real host + client network match over
+localhost and checks that both machines agree on the map and the result. Takes
+about a minute and a half. The same
 checks run on GitHub for every push (`.github/workflows/smoke-test.yml`).
 
 The game also takes launch options after `--`, which the tests use:
-`--practice`, `--host`, `--join=IP`, `--bots=N`, `--char=willow`, `--autostart=N`,
+`--practice`, `--host`, `--join=IP`, `--map=studio`, `--bots=N`, `--char=willow`, `--autostart=N`,
 `--autopilot`, `--war=SECONDS`, `--cleanup=SECONDS`, `--quit-after=SECONDS`,
 `--screenshot=PATH@SECONDS`. For example, `godot --path game -- --practice --bots=5 --autostart=1`
 drops you straight into a 3v3 match.

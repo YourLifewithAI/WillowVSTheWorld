@@ -15,6 +15,9 @@ var _hesitate := 0.0
 var _wander := Vector2.ZERO
 var _wander_t := 0.0
 var _nap_t := randf_range(2.0, 5.0)
+var _path := PackedVector2Array()
+var _path_goal := Vector2.INF
+var _path_t := 0.0
 
 
 func _init(player: Player, match_node: Match) -> void:
@@ -201,11 +204,25 @@ func _closest_to(pos: Vector2) -> bool:
 
 # =============================================================== movement
 
-## Heads for `goal` in floor space, feeling around furniture when blocked.
+## Heads for `goal` along the navigation mesh (flyers go straight), feeling
+## around anything in the way. Returns a floor-space direction.
 func _steer(goal: Vector2, delta: float) -> Vector2:
-	var to := Iso.to_floor(goal - me.position)
-	if to.length() < 3.0:
+	if Iso.fdist(goal, me.position) < 3.0:
 		return Vector2.ZERO
+	var waypoint := goal
+	if not me.data.get("flying", false):
+		_path_t -= delta
+		if _path_t <= 0.0 or Iso.fdist(goal, _path_goal) > 12.0:
+			_path_t = 0.3
+			_path_goal = goal
+			_path = arena.level.find_path(me.position, goal)
+		while _path.size() > 1 and Iso.fdist(_path[0], me.position) < 6.0:
+			_path.remove_at(0)
+		if not _path.is_empty():
+			waypoint = _path[0]
+	var to := Iso.to_floor(waypoint - me.position)
+	if to.length() < 0.5:
+		to = Iso.to_floor(goal - me.position)
 	var dir := to.normalized()
 
 	# Stuck on something? Pick a sideways detour for a moment.

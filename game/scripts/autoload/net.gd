@@ -23,6 +23,8 @@ const MATCH_SCENE := "res://scenes/match/match.tscn"
 var roster: Dictionary = {}
 var local_name := "Player"
 var local_char := "willow"
+## Which home the host picked (see Maps).
+var map_id := Maps.DEFAULT
 var in_match := false
 var online := false
 ## True once a --practice/--host/--join launch option has been used, so
@@ -33,6 +35,7 @@ var autolaunched := false
 ##   --practice | --host | --join=IP     skip the menu
 ##   --bots=N          host adds N bots, alternating teams
 ##   --char=ID         pick a character
+##   --map=ID          host picks a map (living_room, studio, farmhouse, suburbs)
 ##   --autostart=N     host starts the match once N humans are in the lobby
 ##   --autopilot       a bot drives your character (for soak tests)
 ##   --war=SEC --cleanup=SEC   phase lengths
@@ -53,6 +56,8 @@ func _ready() -> void:
 		options[parts[0]] = parts[1] if parts.size() > 1 else "true"
 	local_name = options.get("name", _default_name())
 	local_char = options.get("char", local_char)
+	if Maps.exists(options.get("map", "")):
+		map_id = options["map"]
 	multiplayer.peer_connected.connect(_on_peer_connected)
 	multiplayer.peer_disconnected.connect(_on_peer_disconnected)
 	multiplayer.connected_to_server.connect(_on_connected_to_server)
@@ -208,7 +213,7 @@ func can_start() -> bool:
 func start_match() -> void:
 	if not can_start():
 		return
-	_cl_begin_match.rpc(roster)
+	_cl_begin_match.rpc(roster, map_id)
 
 
 func return_to_lobby() -> void:
@@ -234,19 +239,28 @@ func _srv_register(info: Dictionary) -> void:
 	_maybe_autostart()
 
 
+## Host only: pick the home to fight in.
+func set_map(id: String) -> void:
+	if is_host() and Maps.exists(id):
+		map_id = id
+		_broadcast_roster()
+
+
 func _broadcast_roster() -> void:
-	_cl_roster.rpc(roster)
+	_cl_roster.rpc(roster, map_id)
 
 
 @rpc("authority", "call_local", "reliable")
-func _cl_roster(new_roster: Dictionary) -> void:
+func _cl_roster(new_roster: Dictionary, new_map: String) -> void:
 	roster = new_roster
+	map_id = new_map
 	roster_changed.emit()
 
 
 @rpc("authority", "call_local", "reliable")
-func _cl_begin_match(final_roster: Dictionary) -> void:
+func _cl_begin_match(final_roster: Dictionary, final_map: String) -> void:
 	roster = final_roster
+	map_id = final_map
 	in_match = true
 	get_tree().change_scene_to_file(MATCH_SCENE)
 
@@ -276,7 +290,7 @@ func _on_peer_connected(id: int) -> void:
 			# No late joining yet: politely hang up on them.
 			(multiplayer.multiplayer_peer as ENetMultiplayerPeer).disconnect_peer(id)
 			return
-		_cl_roster.rpc_id(id, roster)
+		_cl_roster.rpc_id(id, roster, map_id)
 
 
 func _on_peer_disconnected(id: int) -> void:

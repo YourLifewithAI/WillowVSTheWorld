@@ -1,7 +1,6 @@
 [gd_scene format=3]
 
 [ext_resource type="Script" path="res://scenes/match/match.gd" id="1_match"]
-[ext_resource type="PackedScene" path="res://scenes/level/living_room.tscn" id="2_room"]
 [ext_resource type="Script" path="res://scenes/match/hud.gd" id="3_hud"]
 
 [node name="Match" type="Control"]
@@ -31,9 +30,6 @@ snap_2d_vertices_to_pixel = true
 canvas_item_default_texture_filter = 0
 size = Vector2i(640, 360)
 render_target_update_mode = 4
-
-[node name="LivingRoom" parent="World/SubViewport" instance=ExtResource("2_room")]
-position = Vector2(320, 86)
 
 [node name="HUD" type="CanvasLayer" parent="."]
 script = ExtResource("3_hud")
