@@ -76,6 +76,15 @@ func _ready() -> void:
 			get_tree().create_timer(at, true, false, true).timeout.connect(_screenshot.bind(parts[0]))
 
 
+## F11 (or Alt+Enter) switches fullscreen on and off anywhere in the game.
+func _unhandled_key_input(event: InputEvent) -> void:
+	var key := event as InputEventKey
+	if key and key.pressed and not key.echo and (key.keycode == KEY_F11 or (key.keycode == KEY_ENTER and key.alt_pressed)):
+		var full := DisplayServer.window_get_mode() == DisplayServer.WINDOW_MODE_FULLSCREEN
+		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED if full else DisplayServer.WINDOW_MODE_FULLSCREEN)
+		get_viewport().set_input_as_handled()
+
+
 func _quit_with_summary() -> void:
 	if Match.current:
 		print("[summary:%d] %s" % [my_id(), Match.current.summary()])

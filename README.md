@@ -100,6 +100,7 @@ add or remove them in the lobby.
 | Throw the remote / hold to tidy | E | right button | right face button (Xbox B, Switch A) |
 | Gag (when the meter is full) | I or Q | SL or SR | a shoulder button or trigger |
 | Menu (pauses in Practice) | Esc | + or - | Start or Back |
+| Fullscreen on/off | F11 or Alt+Enter | | |
 
 Buttons go by position, not by the letter printed on them, so a Joy-Con works the
 same whichever way round it is.
