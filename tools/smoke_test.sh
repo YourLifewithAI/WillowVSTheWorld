@@ -70,6 +70,15 @@ for MAP in $MAPS; do
   unset MISSED_CUE
 done
 
+echo "== Shared screen: four people on fake Joy-Cons and a controller"
+"$GODOT" --headless --fixed-fps 60 --path "$GAME" res://tests/couch_test.tscn -- --war=60 --cleanup=5 \
+  > "$OUT/couch.log" 2>&1
+no_script_errors "$OUT/couch.log" "couch"
+grep -E "^  (PASS|FAIL)  couch:" "$OUT/couch.log"
+if grep -q "FAIL  couch:" "$OUT/couch.log" || ! grep -q "^\[couch\] [0-9]* passed, 0 failed" "$OUT/couch.log"; then
+  FAILED=1
+fi
+
 echo "== Network match (host + client over localhost, real time, ~70s)"
 "$GODOT" --headless --path "$GAME" -- --host --name=Host --map=farmhouse --bots=2 --autostart=2 --autopilot \
   --war=30 --cleanup=15 --quit-after=62 > "$OUT/host.log" 2>&1 &

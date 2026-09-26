@@ -42,8 +42,11 @@ var data: Dictionary = {}
 var team := 0
 var display_name := ""
 var is_bot := false
-## Drives this character instead of the keyboard (bots and --autopilot).
-var brain: BotBrain
+## Whatever drives this character on this machine: a person's seat (SeatInput)
+## or a bot (BotBrain). Remote players have none.
+var brain: Controls
+## Which seat on this screen plays this character (-1: a bot or someone elsewhere).
+var seat := -1
 var arena: Match
 
 # --- Mirrored from the host.
@@ -127,7 +130,8 @@ func setup(p_id: int, info: Dictionary, p_arena: Match) -> void:
 	max_hp = data["hp"]
 	hp = max_hp
 	arena = p_arena
-	set_multiplayer_authority(1 if is_bot else p_id)
+	# Guests on a shared screen are owned by that screen's machine, like bots are by the host.
+	set_multiplayer_authority(1 if is_bot else int(info.get("owner", p_id)))
 
 
 func _ready() -> void:
@@ -165,8 +169,17 @@ func hover() -> float:
 	return float(data.get("hover", 0.0))
 
 
+## Played by someone looking at this screen (you, or a guest sharing it).
 func is_local() -> bool:
-	return is_multiplayer_authority() and not is_bot
+	return seat >= 0
+
+
+## Ring and tag colour: the seat's colour when several people share the
+## screen (so everyone can find themselves), otherwise the team colour.
+func marker_color() -> Color:
+	if seat >= 0 and arena.shared_screen():
+		return Seats.color(seat)
+	return Roster.TEAM_COLORS[team]
 
 
 func sprite_height() -> float:
@@ -227,7 +240,11 @@ func _owner_tick(delta: float) -> void:
 		var was_ready := gag_charge >= 1.0
 		gag_charge = minf(1.0, gag_charge + delta / GAG_CHARGE_TIME)
 		if gag_charge >= 1.0 and not was_ready and is_local():
-			Audio.play("gag_ready")
+			if arena.shared_screen():
+				sound("gag_ready")
+				Fx.text(arena.level.entities, position + Vector2(0, -sprite_height() - z - 10), "GAG READY!", marker_color())
+			else:
+				Audio.play("gag_ready")
 
 	var inp := _gather_input()
 	var free_to_act := arena.can_move() and not is_ko and stun <= 0.0
@@ -779,11 +796,19 @@ func _process(delta: float) -> void:
 	if capture_mode == Capture.SWALLOWED:
 		target_alpha = 0.0  # Inside the dust bin.
 	elif stealthed and not is_ko:
-		var viewer := arena.local_player()
-		var viewer_team := viewer.team if viewer else team
-		if viewer_team == team:
+		var teams := arena.screen_teams()
+		if teams.size() > 1:
+			# Both teams share this screen, so everyone sees the same thing: a faint
+			# shimmer (just enough for its player to keep track of it), unless the
+			# other team has sniffed it out.
+			if arena.is_revealed(self, 1 - team):
+				target_alpha = 0.85
+				_revealed = true
+			else:
+				target_alpha = 0.14 if moving and not hiding else 0.07
+		elif teams[0] == team:
 			target_alpha = 0.4
-		elif arena.is_revealed(self, viewer_team):
+		elif arena.is_revealed(self, teams[0]):
 			target_alpha = 0.85
 			_revealed = true
 		else:
@@ -835,12 +860,12 @@ func _draw() -> void:
 	# Shadow, shrinking as we go up.
 	var shadow_r := 7.0 - clampf(z / 12.0, 0.0, 3.0)
 	draw_colored_polygon(Iso.ellipse(shadow_r, 16), Color(0, 0, 0, 0.25))
-	# Team ring (brighter for your own character; red dashes when revealed).
+	# Team ring (brighter, in the seat's colour, for people on this screen; red when revealed).
 	var ring := Iso.ellipse(9.0 if is_local() else 8.0, 20)
 	ring.append(ring[0])
-	var col: Color = Color("ff5a6e") if _revealed else Roster.TEAM_COLORS[team]
+	var col: Color = Color("ff5a6e") if _revealed else marker_color()
 	col.a = 0.95 if is_local() or _revealed else 0.55
-	draw_polyline(ring, col, 1.0)
+	draw_polyline(ring, col, 2.0 if is_local() and arena.shared_screen() else 1.0)
 	# The Claw hangs from a cable on a trolley that rides the ceiling rails.
 	if char_id == "claw" and not is_ko:
 		var top := Vector2(0, round(-z) - sprite_height() + 2)
@@ -860,6 +885,20 @@ func _draw() -> void:
 		draw_polyline(edge, Color(1, 0.35, 0.35, 0.8), 1.0)
 
 
+## The bobbing arrow over your own character; with several people on one
+## screen, in the seat's colour with "P2" etc. next to it.
+func _draw_you_marker(tip: Vector2) -> void:
+	var shared := arena.shared_screen()
+	var col := marker_color() if shared else Color.WHITE
+	_overlay.draw_colored_polygon(PackedVector2Array([tip + Vector2(-3, -3), tip + Vector2(3, -3), tip]), col)
+	if shared:
+		var label := Seats.tag(seat)
+		var font := ThemeDB.fallback_font
+		var at := tip + Vector2(-font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 7).x / 2.0, -5)
+		_overlay.draw_string_outline(font, at, label, HORIZONTAL_ALIGNMENT_LEFT, -1, 7, 3, Color("2b1d2a"))
+		_overlay.draw_string(font, at, label, HORIZONTAL_ALIGNMENT_LEFT, -1, 7, col)
+
+
 func _draw_overlay() -> void:
 	if is_ko:
 		var zz := Vector2(4, -14 - sin(_anim_t * 3.0) * 2.0)
@@ -869,8 +908,7 @@ func _draw_overlay() -> void:
 	var head := Vector2(0, round(-z) - sprite_height() - 3)
 	if arena.phase != Match.Phase.WAR and arena.phase != Match.Phase.COUNTDOWN:
 		if is_local():
-			var tip0 := head + Vector2(0, sin(_anim_t * 5.0))
-			_overlay.draw_colored_polygon(PackedVector2Array([tip0 + Vector2(-3, -3), tip0 + Vector2(3, -3), tip0]), Color.WHITE)
+			_draw_you_marker(head + Vector2(0, sin(_anim_t * 5.0)))
 		return
 	# Health pip bar.
 	var w := 14.0
@@ -880,8 +918,7 @@ func _draw_overlay() -> void:
 	var hp_col := Color("8ff0a4") if frac > 0.5 else (Color("ffd84d") if frac > 0.25 else Color("ff5a6e"))
 	_overlay.draw_rect(Rect2(bar.position, Vector2(round(w * frac), 2)), hp_col)
 	if is_local():
-		var tip := head + Vector2(0, -4 + sin(_anim_t * 5.0))
-		_overlay.draw_colored_polygon(PackedVector2Array([tip + Vector2(-3, -3), tip + Vector2(3, -3), tip]), Color.WHITE)
+		_draw_you_marker(head + Vector2(0, -4 + sin(_anim_t * 5.0)))
 	if _revealed:
 		# A little eye: someone's nose or x-ray vision has spotted you.
 		var eye := head + Vector2(0, -7)

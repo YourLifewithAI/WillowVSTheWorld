@@ -7,7 +7,10 @@ extends Node
 ##
 ## The roster maps a player id to their lobby choices:
 ##   { id: {"name": String, "char": String, "team": int, "bot": bool} }
-## Human ids are network peer ids (1 = host). Bot ids are negative.
+## Each machine's own player is keyed by its network peer id (1 = host).
+## Bots, and guests sharing the host's screen (see Seats), get negative ids
+## from one counter; guests also carry "owner" (the peer whose screen they're
+## on) and "seat".
 
 signal roster_changed
 signal joined_lobby
@@ -45,7 +48,7 @@ var autolaunched := false
 ##   --mute            no sound this run;  --audio-log  print every sound as it plays
 var options: Dictionary = {}
 
-var _next_bot_id := -1
+var _next_local_id := -1
 var matches_played := 0
 ## Shown by the main menu after we get dropped back to it.
 var last_error := ""
@@ -125,7 +128,8 @@ func leave(to_menu: bool = true) -> void:
 	roster.clear()
 	in_match = false
 	online = false
-	_next_bot_id = -1
+	_next_local_id = -1
+	Seats.reset()
 	if to_menu:
 		get_tree().change_scene_to_file(MENU_SCENE)
 
@@ -187,9 +191,49 @@ func add_bot(team: int) -> void:
 		pool = ids
 	var pick: String = pool.pick_random()
 	var bot_name: String = Roster.get_char(pick)["name"] + " (bot)"
-	roster[_next_bot_id] = {"name": bot_name, "char": pick, "team": team, "bot": true}
-	_next_bot_id -= 1
+	roster[_next_local_id] = {"name": bot_name, "char": pick, "team": team, "bot": true}
+	_next_local_id -= 1
 	_broadcast_roster()
+
+
+## Host only: someone else on this screen joins (see Seats). Returns their id.
+func add_guest(seat: int) -> int:
+	if not is_host() or roster.size() >= MAX_PLAYERS:
+		return 0
+	# Start them on the side with fewer people, as someone nobody is playing yet.
+	var used := []
+	var humans := [0, 0]
+	for entry: Dictionary in roster.values():
+		if not entry["bot"]:
+			used.append(entry["char"])
+			humans[entry["team"]] += 1
+	var team := 0 if humans[0] < humans[1] else 1
+	var pick := ""
+	for c: String in Roster.ids_for_team(team) + Roster.ids_for_team(1 - team):
+		if not used.has(c):
+			pick = c
+			break
+	if pick.is_empty():
+		pick = Roster.ids_for_team(team)[0]
+	var id := _next_local_id
+	_next_local_id -= 1
+	roster[id] = {"name": "P%d" % (seat + 1), "char": pick, "team": Roster.get_char(pick)["team"],
+		"bot": false, "owner": my_id(), "seat": seat}
+	_broadcast_roster()
+	return id
+
+
+func remove_guest(id: int) -> void:
+	if is_host() and roster.has(id) and not roster[id]["bot"] and roster[id].has("owner"):
+		roster.erase(id)
+		_broadcast_roster()
+
+
+func set_guest_character(id: int, char_id: String) -> void:
+	if is_host() and roster.has(id) and Roster.CHARACTERS.has(char_id):
+		roster[id]["char"] = char_id
+		roster[id]["team"] = Roster.get_char(char_id)["team"]
+		_broadcast_roster()
 
 
 func remove_bots() -> void:
@@ -297,8 +341,14 @@ func _on_peer_connected(id: int) -> void:
 
 
 func _on_peer_disconnected(id: int) -> void:
-	if is_host() and roster.has(id):
-		roster.erase(id)
+	if not is_host():
+		return
+	var gone := false
+	for key: int in roster.keys():
+		if key == id or int(roster[key].get("owner", 0)) == id:
+			roster.erase(key)
+			gone = true
+	if gone:
 		_broadcast_roster()
 
 

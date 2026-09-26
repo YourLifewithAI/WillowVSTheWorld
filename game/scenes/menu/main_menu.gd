@@ -122,6 +122,17 @@ func _build() -> void:
 		_parade.append(icon)
 
 
+## A controller's bottom button (or +) presses whichever button is highlighted.
+## (Godot's menus only take Enter/Space for that out of the box.)
+func _unhandled_input(event: InputEvent) -> void:
+	var jb := event as InputEventJoypadButton
+	if jb and jb.pressed and jb.button_index in [JOY_BUTTON_A, JOY_BUTTON_START]:
+		var focused := get_viewport().gui_get_focus_owner() as BaseButton
+		if focused and not focused.disabled:
+			focused.pressed.emit()
+			get_viewport().set_input_as_handled()
+
+
 func _process(delta: float) -> void:
 	_t += delta
 	for k in _parade.size():

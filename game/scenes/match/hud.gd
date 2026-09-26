@@ -1,8 +1,16 @@
 class_name Hud
 extends CanvasLayer
-## Scoreboard, clock, your health and cooldowns, the event feed, banners,
-## the cleanup meter and the results card. Built in code; it sits on top of
-## the pixel-art world at full resolution so text stays crisp.
+## Scoreboard, clock, a card per person on this screen (health, cooldowns,
+## gag meter), the event feed, banners, the cleanup meter, the menu and the
+## results card. Built in code; it sits on top of the pixel-art world at full
+## resolution so text stays crisp.
+##
+## Controllers never move the menus' focus (several people share one screen);
+## the menu and results are driven by each seat's + / - and bottom buttons
+## instead (see _poll_menus).
+
+const KEY_HINT := "Move: WASD   Attack: J   Special: K   Gag: I   Dash: Space   Throw remote: E"
+const PAD_HINT := "Stick: move   Bottom: dash   Left: attack   Top: special   Right: throw the remote   SL/SR: gag   + or -: menu"
 
 var arena: Match
 
@@ -14,13 +22,8 @@ var _phase: Label
 var _tidy_box: Control
 var _tidy_bar: ProgressBar
 var _tidy_label: Label
-var _hp_bar: ProgressBar
-var _special_bar: ProgressBar
-var _special_label: Label
-var _dash_bar: ProgressBar
-var _gag_bar: ProgressBar
-var _gag_label: Label
-var _card: Control
+## One per person on this screen: {player, hp, special_bar, dash_bar, gag_bar, gag_label, special_label}.
+var _cards: Array[Dictionary] = []
 var _feed: VBoxContainer
 var _banner: VBoxContainer
 var _banner_title: Label
@@ -29,26 +32,37 @@ var _banner_tween: Tween
 var _hint: Label
 var _results: Control
 var _pause: Control
+var _pause_buttons: Array[Button] = []
+var _pause_seat := 0
+var _pause_sel := 0
+var _rematch: Button
+var _results_ready := false
 
 
 func setup(match_node: Match) -> void:
 	arena = match_node
+	process_mode = Node.PROCESS_MODE_ALWAYS  # the menu works while the game is paused
 	_root = Control.new()
 	_root.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_root.theme = UiTheme.build()
 	add_child(_root)
 	_build_scoreboard()
-	_build_card()
+	_build_cards()
 	_build_feed()
 	_build_banner()
 	_hint = UiTheme.label("", 8, Color.WHITE, true)
 	_hint.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
 	_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_hint.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	_hint.position.y -= 14
+	_hint.position.y -= 14 if not arena.shared_screen() else 58
 	_root.add_child(_hint)
 	on_phase_changed()
+
+
+func _exit_tree() -> void:
+	if get_tree() and get_tree().paused:
+		get_tree().paused = false
 
 
 func _build_scoreboard() -> void:
@@ -93,38 +107,74 @@ func _build_scoreboard() -> void:
 	_tidy_box.add_child(_tidy_bar)
 
 
-func _build_card() -> void:
-	var me := arena.local_player()
-	if me == null:
+## A card per person on this screen: along the bottom when several share it,
+## in the corner when it's just you.
+func _build_cards() -> void:
+	var locals := arena.local_players()
+	if locals.is_empty():
 		return
-	_card = PanelContainer.new()
-	_card.add_theme_stylebox_override("panel", UiTheme.box(Color(0.23, 0.16, 0.19, 0.85), Roster.TEAM_COLORS[me.team], 8, 1, 4))
-	_card.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
-	_card.grow_vertical = Control.GROW_DIRECTION_BEGIN
-	_card.position += Vector2(6, -6)
-	_root.add_child(_card)
+	var shared := locals.size() > 1
+	var strip := HBoxContainer.new()
+	strip.add_theme_constant_override("separation", 4)
+	if shared:
+		strip.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
+		strip.grow_horizontal = Control.GROW_DIRECTION_BOTH
+		strip.alignment = BoxContainer.ALIGNMENT_CENTER
+		strip.position.y -= 4
+	else:
+		strip.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
+		strip.position += Vector2(6, -6)
+	strip.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	_root.add_child(strip)
+	# Everyone's card has to fit across the 640px screen.
+	var width := 80.0 if not shared else clampf((632.0 - 4.0 * locals.size()) / locals.size() - 34.0, 40.0, 96.0)
+	for p in locals:
+		_cards.append(_build_card(strip, p, width, shared))
+
+
+func _build_card(parent: Control, p: Player, width: float, shared: bool) -> Dictionary:
+	var border := p.marker_color() if shared else Roster.TEAM_COLORS[p.team]
+	var card := PanelContainer.new()
+	card.add_theme_stylebox_override("panel", UiTheme.box(Color(0.23, 0.16, 0.19, 0.85), border, 8, 2 if shared else 1, 4))
+	parent.add_child(card)
 	var row := HBoxContainer.new()
-	_card.add_child(row)
-	row.add_child(UiTheme.sprite_icon(me.char_id, 28))
+	row.add_theme_constant_override("separation", 3)
+	card.add_child(row)
+	row.add_child(UiTheme.sprite_icon(p.char_id, 20 if shared else 28))
 	var col := VBoxContainer.new()
 	col.add_theme_constant_override("separation", 1)
 	row.add_child(col)
-	col.add_child(UiTheme.label("%s  ·  %s" % [me.data["name"], me.data["role"]], 8, Color.WHITE))
-	_hp_bar = UiTheme.bar(Color("8ff0a4"), 80, 5)
-	col.add_child(_hp_bar)
-	_special_label = UiTheme.label("", 7, Color("ffe9c7"))
-	col.add_child(_special_label)
+	var small := 6 if shared else 7
+	if shared:
+		col.add_child(_status_label("%s  %s" % [Seats.tag(p.seat), p.data["name"]], width, 7, border.lightened(0.25)))
+	else:
+		col.add_child(UiTheme.label("%s  ·  %s" % [p.data["name"], p.data["role"]], 8, Color.WHITE))
+	var c := {"player": p}
+	c["hp"] = UiTheme.bar(Color("8ff0a4"), width, 4 if shared else 5)
+	col.add_child(c["hp"])
+	c["special_label"] = _status_label("", width, small, Color("ffe9c7"))
+	col.add_child(c["special_label"])
 	var bars := HBoxContainer.new()
 	bars.add_theme_constant_override("separation", 3)
 	col.add_child(bars)
-	_special_bar = UiTheme.bar(Color("ffd84d"), 56, 3)
-	_dash_bar = UiTheme.bar(Color("9fd8ff"), 21, 3)
-	bars.add_child(_special_bar)
-	bars.add_child(_dash_bar)
-	_gag_label = UiTheme.label("", 7, Color("e0b8ff"))
-	col.add_child(_gag_label)
-	_gag_bar = UiTheme.bar(Color("c78cff"), 80, 3)
-	col.add_child(_gag_bar)
+	c["special_bar"] = UiTheme.bar(Color("ffd84d"), roundf(width * 0.7), 3)
+	c["dash_bar"] = UiTheme.bar(Color("9fd8ff"), roundf(width * 0.3) - 3, 3)
+	bars.add_child(c["special_bar"])
+	bars.add_child(c["dash_bar"])
+	c["gag_label"] = _status_label("", width, small, Color("e0b8ff"))
+	col.add_child(c["gag_label"])
+	c["gag_bar"] = UiTheme.bar(Color("c78cff"), width, 3)
+	col.add_child(c["gag_bar"])
+	return c
+
+
+## A one-line label that trims itself rather than stretching the card.
+func _status_label(text: String, width: float, size: int, color: Color) -> Label:
+	var l := UiTheme.label(text, size, color)
+	l.custom_minimum_size.x = width
+	l.clip_text = true
+	l.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	return l
 
 
 func _build_feed() -> void:
@@ -195,16 +245,25 @@ func on_phase_changed() -> void:
 			_hint.text = ""
 		Match.Phase.COUNTDOWN:
 			_phase.text = "GET READY"
-			_hint.text = "Move: WASD   Attack: J   Special: K   Gag: I   Dash: Space   Throw remote: E"
+			_hint.text = PAD_HINT if _pads_on_screen() else KEY_HINT
 		Match.Phase.WAR:
 			_phase.text = "WAR FOR THE REMOTE"
-			_hint.text = "Move: WASD   Attack: J   Special: K   Gag: I   Dash: Space   Throw remote: E"
+			_hint.text = PAD_HINT if _pads_on_screen() else KEY_HINT
 		Match.Phase.WHISTLE:
 			_phase.text = "TRUCE!"
 			_hint.text = ""
 		Match.Phase.CLEANUP:
 			_phase.text = "CLEAN UP BEFORE THEY'RE IN"
-			_hint.text = "Hold E by anything broken or knocked over   ·   \"x2\" needs two helpers (or Unit-7 / The Claw)   ·   Return the remote"
+			_hint.text = "Hold %s by anything broken or knocked over   ·   \"x2\" needs two helpers (or Unit-7 / The Claw)   ·   Return the remote" % (
+				"the right button" if _pads_on_screen() else "E")
+
+
+## Is anyone on this screen playing on a controller? (Then hints name buttons, not keys.)
+func _pads_on_screen() -> bool:
+	for p in arena.local_players():
+		if Seats.uses_controller(p.seat):
+			return true
+	return false
 
 
 func _process(_delta: float) -> void:
@@ -222,55 +281,109 @@ func _process(_delta: float) -> void:
 		var tidy := arena.tidiness()
 		_tidy_bar.value = tidy
 		_tidy_label.text = "House tidiness  %d%%   (parents need %d%%)" % [roundi(tidy * 100.0), roundi(Match.TIDY_PASS * 100.0)]
-	var me := arena.local_player()
-	if me and _hp_bar:
-		_hp_bar.value = float(me.hp) / float(me.max_hp)
-		var sp: Dictionary = me.data["special"]
-		_special_bar.value = 1.0 - me.special_cd / float(sp["cooldown"])
-		_dash_bar.value = 1.0 - me.dash_cd / Player.DASH_COOLDOWN
-		_gag_bar.value = me.gag_charge
-		var gag_name: String = me.data["gag"]["name"]
-		if me.gag_t > 0.0:
-			_gag_label.text = "%s!" % gag_name.to_upper()
-		elif me.gag_charge >= 1.0:
-			_gag_label.text = "I: %s READY!" % gag_name.to_upper()
-			_gag_label.modulate.a = 0.6 + 0.4 * sin(Time.get_ticks_msec() / 120.0)
-		else:
-			_gag_label.text = "I: %s  %d%%" % [gag_name, roundi(me.gag_charge * 100.0)]
-			_gag_label.modulate.a = 1.0
-		var ready := "ready!" if me.special_cd <= 0.0 else "%.1fs" % me.special_cd
-		if me.captured_by != 0:
-			_special_label.text = "Swallowed! It's dark in here..." if me.capture_mode == Player.Capture.SWALLOWED else "Grabbed by the Claw!"
-		elif me.dance_t > 0.0:
-			_special_label.text = "Can't stop dancing!"
-		elif arena.phase == Match.Phase.CLEANUP:
-			_special_label.text = "Hold E to fix things (%s)" % me.data["tidy_note"].trim_suffix(".").to_lower()
-		elif me.is_ko:
-			_special_label.text = "KO'd! Back in a moment..."
-		elif me.carrying:
-			_special_label.text = "Carrying the remote! E: pass it  (no dashing)"
-		elif me.hiding:
-			_special_label.text = "Hidden under the furniture. Pounce!"
-		elif me.stealthed:
-			_special_label.text = "Invisible! Your next hit does double damage."
-		else:
-			_special_label.text = "K: %s  %s" % [sp["name"], ready]
+	for c in _cards:
+		_update_card(c)
+	_poll_menus()
+
+
+func _update_card(c: Dictionary) -> void:
+	var me: Player = c["player"]
+	if not is_instance_valid(me):
+		return
+	var keys := Seats.button_names(me.seat)
+	c["hp"].value = float(me.hp) / float(me.max_hp)
+	var sp: Dictionary = me.data["special"]
+	c["special_bar"].value = 1.0 - me.special_cd / float(sp["cooldown"])
+	c["dash_bar"].value = 1.0 - me.dash_cd / Player.DASH_COOLDOWN
+	c["gag_bar"].value = me.gag_charge
+	var gag_label: Label = c["gag_label"]
+	var gag_name: String = me.data["gag"]["name"]
+	if me.gag_t > 0.0:
+		gag_label.text = "%s!" % gag_name.to_upper()
+	elif me.gag_charge >= 1.0:
+		gag_label.text = "%s: %s READY!" % [keys["gag"], gag_name.to_upper()]
+		gag_label.modulate.a = 0.6 + 0.4 * sin(Time.get_ticks_msec() / 120.0)
+	else:
+		gag_label.text = "%s: %s  %d%%" % [keys["gag"], gag_name, roundi(me.gag_charge * 100.0)]
+		gag_label.modulate.a = 1.0
+	var ready := "ready!" if me.special_cd <= 0.0 else "%.1fs" % me.special_cd
+	var label: Label = c["special_label"]
+	if Seats.seat(me.seat) and Seats.seat(me.seat).lost:
+		label.text = "Controller lost! Press any button on it"
+	elif me.captured_by != 0:
+		label.text = "Swallowed! It's dark in here..." if me.capture_mode == Player.Capture.SWALLOWED else "Grabbed by the Claw!"
+	elif me.dance_t > 0.0:
+		label.text = "Can't stop dancing!"
+	elif arena.phase == Match.Phase.CLEANUP:
+		label.text = "Hold %s to fix things (%s)" % [keys["interact"], me.data["tidy_note"].trim_suffix(".").to_lower()]
+	elif me.is_ko:
+		label.text = "KO'd! Back in a moment..."
+	elif me.carrying:
+		label.text = "Carrying the remote! %s: pass it  (no dashing)" % keys["interact"]
+	elif me.hiding:
+		label.text = "Hidden under the furniture. Pounce!"
+	elif me.stealthed:
+		label.text = "Invisible! Your next hit does double damage."
+	else:
+		label.text = "%s: %s  %s" % [keys["special"], sp["name"], ready]
+
+
+## Controllers can't move the menus' focus (see _input), so each seat's
+## + / - opens the menu, and whoever opened it steers it.
+func _poll_menus() -> void:
+	for p in arena.local_players():
+		var n := Seats.nav(p.seat)
+		if _results:
+			if n["menu"] and _results_ready and is_instance_valid(_rematch):
+				_rematch.pressed.emit()
+				return
+		elif _pause:
+			if p.seat != _pause_seat:
+				continue
+			if n["menu"]:
+				_toggle_pause()
+				return
+			if n["x"] != 0 and not _pause_buttons.is_empty():
+				_pause_sel = posmod(_pause_sel + n["x"], _pause_buttons.size())
+				_pause_buttons[_pause_sel].grab_focus()
+				Audio.play("select", -6.0)
+			if n["ok"] and not _pause_buttons.is_empty():
+				_pause_buttons[_pause_sel].pressed.emit()
+				return
+		elif n["menu"] and arena.phase != Match.Phase.RESULTS:
+			_toggle_pause(p.seat)
+			return
+
+
+func _input(event: InputEvent) -> void:
+	if event is InputEventJoypadButton or event is InputEventJoypadMotion:
+		get_viewport().set_input_as_handled()
 
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("ui_cancel") and arena.phase != Match.Phase.RESULTS:
-		_toggle_pause()
+		_toggle_pause(0)
 		get_viewport().set_input_as_handled()
 
 
-func _toggle_pause() -> void:
+## Opens (or closes) the menu. Offline, where everyone playing is on this
+## screen, the game pauses while it's open.
+func _toggle_pause(opener: int = 0) -> void:
 	if _pause:
 		_pause.queue_free()
 		_pause = null
+		_pause_buttons.clear()
+		get_tree().paused = false
 		return
+	_pause_seat = opener
+	_pause_sel = 0
+	if not Net.online:
+		get_tree().paused = true
 	_pause = _centered_panel()
 	var col: VBoxContainer = _pause.get_child(0)
-	col.add_child(UiTheme.label("Leave the match?", 12))
+	col.add_child(UiTheme.label("Paused" if not Net.online else "Menu", 12))
+	if arena.shared_screen() or Seats.uses_controller(opener):
+		col.add_child(UiTheme.label("%s: stick to choose, bottom button to pick, + or - to go back" % Seats.tag(opener), 7, UiTheme.COCOA))
 	var row := HBoxContainer.new()
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
 	col.add_child(row)
@@ -279,11 +392,14 @@ func _toggle_pause() -> void:
 	stay.pressed.connect(_toggle_pause)
 	row.add_child(stay)
 	var leave := Button.new()
-	leave.text = "Leave"
-	leave.pressed.connect(func() -> void: Net.leave())
+	leave.text = "Leave the match"
+	leave.pressed.connect(func() -> void:
+		get_tree().paused = false
+		Net.leave())
 	row.add_child(leave)
+	_pause_buttons = [stay, leave]
 	col.add_child(HSeparator.new())
-	col.add_child(SoundSettings.build())
+	col.add_child(SoundSettings.build(false))
 	stay.grab_focus()
 
 
@@ -361,7 +477,17 @@ func show_results(results: Dictionary) -> void:
 		lobby.text = "Back to lobby"
 		lobby.pressed.connect(Net.return_to_lobby)
 		row.add_child(lobby)
-		again.grab_focus()
+		_rematch = again
+		# Everyone is still mashing buttons as the verdict appears: wait a moment
+		# before anything can start a rematch.
+		get_tree().create_timer(1.5).timeout.connect(func() -> void:
+			_results_ready = true
+			if is_instance_valid(again):
+				again.grab_focus())
+		if _pads_on_screen():
+			var hint := UiTheme.label("Press + or - on a controller for a rematch", 7, UiTheme.COCOA)
+			hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			col.add_child(hint)
 	else:
 		row.add_child(UiTheme.label("Waiting for the host...", 8))
 	var leave := Button.new()

@@ -264,17 +264,50 @@ smart-home-of-the-future where the robots have home advantage.
 
 ## Controls
 
-| Action | Keyboard | Gamepad |
-|---|---|---|
-| Move | WASD / arrow keys | Left stick / d-pad |
-| Attack | J or Z | X (west button) |
-| Special | K or X | Y (north button) |
-| Gag | I or Q | Right bumper |
-| Dash | Space, L or Shift | A (south button) |
-| Interact: throw remote, hold to tidy | E or C | B (east button) |
-| Menu | Esc | |
+| Action | Keyboard | Joy-Con, held sideways | Other controllers |
+|---|---|---|---|
+| Move | WASD / arrow keys | stick | left stick / D-pad |
+| Attack | J or Z | left button | west button |
+| Special | K or X | top button | north button |
+| Gag | I or Q | SL or SR | shoulder buttons / triggers |
+| Dash | Space, L or Shift | bottom button | south button |
+| Interact: throw remote, hold to tidy | E or C | right button | east button |
+| Menu | Esc | + or - | Start / Back |
 
-Remap in Godot: *Project > Project Settings > Input Map*.
+Keys can be remapped in Godot (*Project > Project Settings > Input Map*). Those
+actions are keyboard-only; controllers are read one by one by the `Seats` autoload
+(`scripts/autoload/seats.gd`), so each person drives their own character.
+
+### Shared screen ("couch mode")
+
+Several people on one computer, one screen, a controller each.
+
+- **Seats.** Seat 0 is this machine's own player (the same roster entry online play
+  uses). People join in the lobby by pressing any button on a free controller: the
+  first takes seat 0, the rest become guests. Guests are roster entries owned by the
+  host, like bots (negative ids from the same counter, plus `owner` and `seat`), so
+  the rules, the referee checks and online sync treat them like anyone else. Online
+  friends can still join the same lobby.
+- **Joy-Cons.** A lone Joy-Con already reports as a sideways mini-gamepad. A left + right
+  pair is always merged into one controller by the engine (SDL), and that can't be
+  switched off from inside the game, so `Seats` splits the pair back into two halves and
+  turns each half's stick and buttons a quarter turn. `tests/couch_test.gd` checks those
+  turns against a model of SDL's own code for lone Joy-Cons.
+- **Drop-outs.** When a controller disconnects, its seat keeps its character. The next
+  controller of the same kind to connect takes it back (so when SDL swaps two lone
+  Joy-Cons for a pair, both people get their halves back). Any button on a spare
+  controller does the same.
+- **Who's who.** Seat colours (P1 red, P2 blue, P3 yellow, P4 green, P5 purple, P6 pink,
+  P7 teal, P8 white) on each character's ring and "P2" tag, their lobby pick, and a card
+  per person along the bottom of the screen.
+- **Stealth on a shared screen.** If everyone on the sofa is on one team, stealth looks
+  the same as online (teammates ghostly, enemies invisible). If both teams share the
+  screen, a hidden character is a faint shimmer for everyone unless the other team has
+  sniffed it out.
+- **Menus.** Controllers never move menu focus (several people would fight over it). Any
+  seat's + or - opens the menu (pausing the game in Practice, where nobody is on
+  another machine) and that seat steers it. The results card ignores everything for 1.5 s, then
+  + or - means rematch.
 
 ## Art direction
 
@@ -412,7 +445,7 @@ needs tuning against **human** playtests.
 | **M2: Real art** | Animated character sprites, furniture sprites, UI art, a pixel font, a title screen. |
 | **M3: Content** | More homes (see the list above), a backyard, 2 more characters per side, home events (the doorbell, a delivery drone, the cat flap, the smart home's lights turning off). |
 | **M4: Online** | Internet play without port forwarding (relay or Steam/Epic networking), invite codes, reconnects, lag compensation for hits. |
-| **M5: Couch mode** | Several players on one screen with gamepads. It's a cozy game; this is where it will shine. |
+| **M5: Couch mode** | ~~Several players on one screen with gamepads~~ (in: join from the lobby, split Joy-Con pairs, per-seat cards; needs real-hardware playtests). Next: guests on client machines, per-seat rumble, "ready" checks. |
 | **M6: Ship** | Steam page, demo, festival builds. |
 
 ## Open questions

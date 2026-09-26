@@ -91,15 +91,48 @@ add or remove them in the lobby.
 
 ### Controls
 
-| | Keyboard | Gamepad |
-|---|---|---|
-| Move | WASD / arrows | left stick |
-| Attack (hold for automatic weapons) | J | X |
-| Special | K | Y |
-| Gag (when the meter is full) | I or Q | Right bumper |
-| Dash | Space | A |
-| Throw the remote / hold to tidy | E | B |
-| Leave the match | Esc | |
+| | Keyboard | Joy-Con, held sideways | Other controllers |
+|---|---|---|---|
+| Move | WASD / arrows | stick | left stick or D-pad |
+| Attack (hold for automatic weapons) | J | left button | left face button (Xbox X, Switch Y) |
+| Special | K | top button | top face button (Xbox Y, Switch X) |
+| Dash | Space | bottom button | bottom face button (Xbox A, Switch B) |
+| Throw the remote / hold to tidy | E | right button | right face button (Xbox B, Switch A) |
+| Gag (when the meter is full) | I or Q | SL or SR | a shoulder button or trigger |
+| Menu (pauses in Practice) | Esc | + or - | Start or Back |
+
+Buttons go by position, not by the letter printed on them, so a Joy-Con works the
+same whichever way round it is.
+
+### Everyone on one screen (Joy-Cons and a TV)
+
+Up to 8 people can play on one computer, each with their own controller, all on
+one screen (cast or plug the laptop into the TV).
+
+1. **Pair each Joy-Con with the computer.** Windows: *Settings > Bluetooth & devices >
+   Add device > Bluetooth*. Mac: *System Settings > Bluetooth*. Hold the small round sync
+   button on the Joy-Con's inner edge (between SL and SR) until its lights run, then pick
+   "Joy-Con (L)" or "Joy-Con (R)" from the list. Other controllers pair the same way or
+   just plug in.
+2. **Start the game** and choose **Practice vs bots** (or **Host a game** if friends
+   elsewhere are joining too).
+3. **In the lobby, everyone presses any button** on their controller. The first person
+   becomes P1, the next P2, and so on. Each person's tag (P1 red, P2 blue, P3 yellow,
+   P4 green...) marks their character on the character list, over their character's head
+   and on their card at the bottom of the screen.
+4. **Push the stick left or right** to change character. Anyone's **+ or -** starts
+   the match. Add bots with the buttons on the left to fill out the teams.
+
+Good to know:
+- **A left and right Joy-Con count as two players** even though the computer merges
+  them into one controller. Each half is held sideways by a different person.
+- **If a Joy-Con disconnects** (they doze off after a while), wake it and press any
+  button: its player gets it back. Any spare controller works too.
+- **+ or - opens the menu**, and in Practice it pauses the game. The stick picks, the
+  bottom button chooses.
+- **Invisible cats and hidden Zoombas** can't be invisible to only half a sofa, so on a
+  shared screen they show as a faint shimmer that you have to watch for.
+- **Playing alone?** No joining needed: the keyboard and any controller just work.
 
 ### Playing with friends
 

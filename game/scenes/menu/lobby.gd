@@ -1,5 +1,10 @@
 extends Control
 ## Pick your side, pick your character, wait for friends, start.
+##
+## Friends on the same screen join by pressing a button on their own
+## controller (see Seats). Each seat then flips through the characters with
+## its stick, and anyone's + or - starts the match. Controllers never move the
+## menu's focus here; the keyboard and mouse work the menu as usual.
 
 var _players_box: VBoxContainer
 var _info: Label
@@ -9,14 +14,62 @@ var _detail: Label
 var _map_pick: OptionButton
 var _map_label: Label
 var _built := false
+var _badges: Dictionary = {}  # character id -> HBoxContainer of seat tags
+var _notice: Label
 
 
 func _ready() -> void:
 	theme = UiTheme.build()
 	_build()
 	Audio.music("menu")
+	Seats.accepting_joins = Net.is_host()
 	Net.roster_changed.connect(_refresh)
+	Seats.changed.connect(_refresh)
+	Seats.notice.connect(_on_notice)
 	_refresh()
+
+
+func _exit_tree() -> void:
+	Seats.accepting_joins = false
+
+
+## Controllers pick characters and start; they never move the menu's focus.
+func _input(event: InputEvent) -> void:
+	if event is InputEventJoypadButton or event is InputEventJoypadMotion:
+		get_viewport().set_input_as_handled()
+
+
+func _process(_delta: float) -> void:
+	for st in Seats.seats:
+		# Seat 0 on the keyboard uses the buttons; anyone with their own controller
+		# (or a guest on the keyboard) flips through characters instead.
+		if not st.has_controller() and not (st.device == Seats.KEYBOARD and st.index != 0):
+			continue
+		var n := Seats.nav(st.index)
+		if n["x"] != 0:
+			Seats.cycle_character(st.index, n["x"])
+			_show_detail(Seats.char_of(st.index))
+		if n["menu"]:
+			_try_start()
+
+
+func _try_start() -> void:
+	if not Net.is_host():
+		return
+	if Net.can_start():
+		Audio.play("start")
+		Net.start_match()
+	else:
+		_on_notice("Each side needs at least one player: pick someone from the other team, or add a bot.", Color("e05a5a"))
+
+
+func _on_notice(text: String, color: Color) -> void:
+	_notice.text = text
+	_notice.add_theme_color_override("font_color", color.darkened(0.35))
+	var shown := text
+	get_tree().create_timer(5.0).timeout.connect(func() -> void:
+		if is_instance_valid(_notice) and _notice.text == shown:
+			_notice.text = "")
 
 
 func _build() -> void:
@@ -47,7 +100,12 @@ func _build() -> void:
 	lcol.add_child(_info)
 	_players_box = VBoxContainer.new()
 	_players_box.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_players_box.add_theme_constant_override("separation", 0)
 	lcol.add_child(_players_box)
+	_notice = UiTheme.label("", 8)
+	_notice.autowrap_mode = TextServer.AUTOWRAP_WORD
+	_notice.custom_minimum_size.x = 170
+	lcol.add_child(_notice)
 	var map_row := HBoxContainer.new()
 	map_row.add_child(UiTheme.label("Home:", 10))
 	if Net.is_host():
@@ -123,11 +181,24 @@ func _build() -> void:
 			nl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 			v.add_child(nl)
 			b.add_child(v)
+			# "P1 P3": who on this screen is playing this character.
+			var badges := HBoxContainer.new()
+			badges.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			badges.position = Vector2(3, 1)
+			badges.add_theme_constant_override("separation", 2)
+			b.add_child(badges)
+			_badges[id] = badges
 			b.pressed.connect(_pick.bind(id))
 			b.mouse_entered.connect(_show_detail.bind(id))
 			b.focus_entered.connect(_on_char_focus.bind(id))
 			grid.add_child(b)
 			_char_buttons[id] = b
+	if Net.is_host():
+		var join := UiTheme.label("Playing on this screen? Press any button on your Joy-Con (held sideways) or controller to join. "
+			+ "Push the stick left or right to change character; + or - starts.", 8, UiTheme.COCOA)
+		join.autowrap_mode = TextServer.AUTOWRAP_WORD
+		join.custom_minimum_size.x = 360
+		rcol.add_child(join)
 	_detail = UiTheme.label("", 8)
 	_detail.autowrap_mode = TextServer.AUTOWRAP_WORD
 	_detail.custom_minimum_size = Vector2(360, 60)
@@ -174,12 +245,41 @@ func _refresh() -> void:
 				continue
 			var row := HBoxContainer.new()
 			row.add_child(UiTheme.sprite_icon(entry["char"], 18))
+			var mine := id == Net.my_id() or int(entry.get("owner", 0)) == Net.my_id()
+			var seat_index := int(entry.get("seat", 0))
+			var name_col := Roster.TEAM_COLORS[team].darkened(0.35)
+			var shared := mine and Seats.seats.size() > 1
+			if shared:
+				name_col = Seats.color(seat_index).darkened(0.35)
+				if id == Net.my_id():
+					row.add_child(UiTheme.label(Seats.tag(0), 9, name_col))
 			var you := "  (you)" if id == Net.my_id() else ""
 			var host := "  ★ host" if id == 1 else ""
-			row.add_child(UiTheme.label("%s%s%s" % [entry["name"], you, host], 9, Roster.TEAM_COLORS[team].darkened(0.35)))
+			var holding := Seats.device_label(seat_index) if shared else ""
+			var label := UiTheme.label("%s%s%s" % [entry["name"], you, host], 9, name_col)
+			row.add_child(label)
+			if not holding.is_empty():
+				row.add_child(UiTheme.label(holding, 7, UiTheme.COCOA))
+			if Net.is_host() and entry.has("owner") and not entry["bot"]:
+				var kick := Button.new()
+				kick.text = "x"
+				kick.tooltip_text = "Remove %s" % entry["name"]
+				kick.focus_mode = Control.FOCUS_NONE
+				kick.add_theme_font_size_override("font_size", 7)
+				kick.pressed.connect(Seats.remove.bind(seat_index))
+				row.add_child(kick)
 			_players_box.add_child(row)
 	for id: String in _char_buttons:
 		_char_buttons[id].button_pressed = id == Net.local_char
+	# Seat tags on the characters people on this screen have picked.
+	for id: String in _badges:
+		for child in _badges[id].get_children():
+			child.queue_free()
+	if Seats.seats.size() > 1:
+		for st in Seats.seats:
+			var picked := Seats.char_of(st.index)
+			if _badges.has(picked):
+				_badges[picked].add_child(UiTheme.label(Seats.tag(st.index), 8, Seats.color(st.index), true))
 	var map: Dictionary = Maps.get_map(Net.map_id)
 	if _map_pick:
 		_map_pick.select(Maps.ORDER.find(Net.map_id))

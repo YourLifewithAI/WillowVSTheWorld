@@ -1,5 +1,5 @@
 class_name BotBrain
-extends RefCounted
+extends Controls
 ## A simple bot that produces the same input a player would.
 ## During the war it grabs, escorts, or chases the remote. During cleanup it
 ## helps fix whatever is closest (and not already being handled).

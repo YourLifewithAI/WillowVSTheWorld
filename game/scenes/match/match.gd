@@ -84,6 +84,8 @@ func _ready() -> void:
 	var world: SubViewport = $World/SubViewport
 	world.add_child(level)
 	level.position = level.centered_position(Vector2(world.size))
+	if _people_on_this_screen() > 1:
+		level.position.y -= 14  # room for everyone's cards along the bottom
 	war_time = map_info.get("war_time", war_time)
 	cleanup_time = map_info.get("cleanup_time", cleanup_time)
 	capture_limit = map_info.get("capture_limit", capture_limit)
@@ -128,13 +130,54 @@ func _spawn_players() -> void:
 		stats[id] = {"bonks": 0, "caps": 0, "fixes": 0}
 		if p.is_bot and multiplayer.is_server():
 			p.brain = BotBrain.new(p, self)
-		elif id == Net.my_id() and Net.options.has("autopilot"):
-			p.brain = BotBrain.new(p, self)
+		elif not p.is_bot and int(info.get("owner", id)) == Net.my_id():
+			# Someone on this screen: you (seat 0) or a guest sharing it.
+			p.seat = int(info.get("seat", 0))
+			p.brain = BotBrain.new(p, self) if Net.options.has("autopilot") else SeatInput.new(p.seat)
 		level.entities.add_child(p)
+
+
+func _people_on_this_screen() -> int:
+	var n := 0
+	for id: int in Net.roster:
+		var entry: Dictionary = Net.roster[id]
+		if not entry["bot"] and (id == Net.my_id() or int(entry.get("owner", 0)) == Net.my_id()):
+			n += 1
+	return n
 
 
 func local_player() -> Player:
 	return players.get(Net.my_id())
+
+
+## Everyone playing on this screen (you first, then guests), in seat order.
+func local_players() -> Array[Player]:
+	var out: Array[Player] = []
+	for p: Player in players.values():
+		if p.seat >= 0:
+			out.append(p)
+	out.sort_custom(func(a: Player, b: Player) -> bool: return a.seat < b.seat)
+	return out
+
+
+## More than one person is playing on this screen.
+func shared_screen() -> bool:
+	var n := 0
+	for p: Player in players.values():
+		if p.seat >= 0:
+			n += 1
+	return n > 1
+
+
+## The teams of the people looking at this screen.
+func screen_teams() -> Array[int]:
+	var out: Array[int] = []
+	for p in local_players():
+		if not out.has(p.team):
+			out.append(p.team)
+	if out.is_empty():
+		out.append(0)
+	return out
 
 
 func can_move() -> bool:
@@ -164,7 +207,8 @@ func _check_all_loaded() -> void:
 	if phase != Phase.LOADING:
 		return
 	for id: int in players:
-		if not players[id].is_bot and not _loaded.has(id):
+		var owner := int(Net.roster.get(id, {}).get("owner", id))
+		if not players[id].is_bot and not _loaded.has(owner):
 			return
 	_start()
 
@@ -937,8 +981,10 @@ func _cl_satellite(pos: Vector2, delay: float, radius: float) -> void:
 @rpc("authority", "call_local", "reliable")
 func _cl_scan(team: int, duration: float) -> void:
 	_scan_until[team] = _now() + duration
-	if local_player() and local_player().team == team:
-		hud.banner("SATELLITE SCAN", "Every hidden enemy is on screen", Roster.TEAM_COLORS[team])
+	var teams := screen_teams()
+	if teams.has(team):
+		var title := "SATELLITE SCAN" if teams.size() == 1 else "ROBOTS' SATELLITE SCAN" if team == 1 else "PETS' SATELLITE SCAN"
+		hud.banner(title, "Every hidden enemy is on screen", Roster.TEAM_COLORS[team])
 
 
 @rpc("authority", "call_local", "reliable")
@@ -1160,17 +1206,20 @@ func _cl_event(text: String, color: Color) -> void:
 	log_event(text)
 
 
-func _on_peer_disconnected(id: int) -> void:
-	if not players.has(id):
-		return
+func _on_peer_disconnected(peer: int) -> void:
+	# That machine's player, and anyone who was sharing its screen.
+	for id: int in players.keys():
+		if id != peer and int(Net.roster.get(id, {}).get("owner", 0)) != peer:
+			continue
+		if multiplayer.is_server():
+			if remote.carrier_pid == id:
+				_drop_remote(players[id].position)
+			_ko_timers.erase(id)
+			_cl_remove_player.rpc(id)
+		else:
+			_cl_remove_player(id)
 	if multiplayer.is_server():
-		if remote.carrier_pid == id:
-			_drop_remote(players[id].position)
-		_ko_timers.erase(id)
-		_cl_remove_player.rpc(id)
 		_check_all_loaded()
-	else:
-		_cl_remove_player(id)
 
 
 @rpc("authority", "call_local", "reliable")
