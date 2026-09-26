@@ -23,6 +23,12 @@ const TIDY_PASS := 0.6
 const TIDY_SPOTLESS := 0.9
 ## Seconds you must stand on your base, unhurt, to change the channel.
 const CHANNEL_TIME := 2.0
+## Damage multiplier for a hit landed from stealth.
+const AMBUSH_MULT := 2.0
+## Knockback above this flips a character with the "flips" weakness.
+const FLIP_KNOCK := 220.0
+## Most scorch marks, splats and tufts of fur allowed at once.
+const MAX_DEBRIS := 90
 
 static var current: Match
 
@@ -58,6 +64,8 @@ var _sync_t := 0.0
 var _remote_sync_t := 0.0
 var _progress_sync_t := 0.0
 var _load_timeout := 8.0
+var _nav_dirty := false
+var _nav_t := 0.0
 
 
 func _ready() -> void:
@@ -219,6 +227,7 @@ func _physics_process(delta: float) -> void:
 			_tick_ko(delta)
 			_tick_knockovers()
 			_tick_debris(delta)
+			_tick_navigation(delta)
 			if time_left <= 0.0 or scores.max() >= capture_limit:
 				_end_war()
 		Phase.WHISTLE:
@@ -228,6 +237,7 @@ func _physics_process(delta: float) -> void:
 			_tick_remote(delta)
 			_tick_cleanup(delta)
 			_tick_debris(delta)
+			_tick_navigation(delta)
 			if time_left <= 0.0 or mess_remaining() <= 0.0:
 				_finish()
 
@@ -307,6 +317,9 @@ func mess_remaining() -> float:
 	for item in level.mess_items:
 		if item.knocked:
 			m += item.weight()
+	for f in level.furniture:
+		if f.wrecked:
+			m += f.weight()
 	m += debris.size() * 0.5
 	if remote.state != TVRemote.State.HOME:
 		m += 1.0
@@ -447,15 +460,15 @@ func _srv_throw(pid: int, dir: Vector2) -> void:
 
 # ================================================================== combat
 
-func report_hit(attacker: Player, target: Player, ability: int, dir: Vector2) -> void:
+func report_hit(attacker: Player, target: Player, ability: int, dir: Vector2, ambush: bool = false) -> void:
 	if multiplayer.is_server():
-		_srv_hit(attacker.pid, target.pid, ability, dir)
+		_srv_hit(attacker.pid, target.pid, ability, dir, ambush)
 	else:
-		_srv_hit.rpc_id(1, attacker.pid, target.pid, ability, dir)
+		_srv_hit.rpc_id(1, attacker.pid, target.pid, ability, dir, ambush)
 
 
 @rpc("any_peer", "call_remote", "reliable")
-func _srv_hit(aid: int, tid: int, ability: int, dir: Vector2) -> void:
+func _srv_hit(aid: int, tid: int, ability: int, dir: Vector2, ambush: bool) -> void:
 	if not multiplayer.is_server() or phase != Phase.WAR:
 		return
 	var a: Player = players.get(aid)
@@ -466,22 +479,40 @@ func _srv_hit(aid: int, tid: int, ability: int, dir: Vector2) -> void:
 		return
 	if Iso.fdist(a.position, t.position) > 400.0:
 		return
-	var spec: Dictionary = a.data["special"] if ability == 1 else a.data["attack"]
+	var spec := Roster.ability(a.data, ability)
+	var kind := int(spec.get("kind", -1))
+	# Flyers are out of reach of slams and suction.
+	if ability == 1 and t.data.get("flying", false) and (kind == Roster.Special.SLAM or kind == Roster.Special.PULL):
+		return
 	var d := dir.normalized() if dir.length() > 0.01 else Vector2.RIGHT
+	var damage := float(spec.get("damage", 0))
 	var knock := float(spec.get("knock", 0.0))
-	if ability == 1 and int(spec.get("kind", -1)) == Roster.Special.PULL:
+	var stun := float(spec.get("stun", 0.0))
+	if ability == 1 and kind == Roster.Special.PULL:
 		d = Iso.to_floor(a.position - t.position).normalized()
 		knock *= clampf(Iso.fdist(a.position, t.position) / float(spec["radius"]), 0.35, 1.0)
-	t.hp = maxi(0, t.hp - int(spec.get("damage", 0)))
-	if remote.carrier_pid == tid:
+	# Hits from hiding hurt twice as much (if the attacker really was hidden).
+	var ambushed := ambush and Time.get_ticks_msec() / 1000.0 - a.last_stealth_time < 0.6
+	if ambushed:
+		damage *= AMBUSH_MULT
+		stun = maxf(stun, 0.5)
+		log_event("ambush %d on %d" % [aid, tid])
+	knock *= float(t.data.get("knock_mult", 1.0))
+	if t.data.get("flips", false) and knock >= FLIP_KNOCK:
+		stun = maxf(stun, 1.5)
+	t.hp = maxi(0, t.hp - roundi(damage))
+	if remote.carrier_pid == tid and remote.state == TVRemote.State.CARRIED:
 		remote.hold = 0.0
-	_cl_damaged.rpc(tid, t.hp, d * knock, float(spec.get("stun", 0.0)))
+		if t.data.get("butterfingers", false) and t.hp > 0:
+			_drop_remote(t.position)
+			_cl_event.rpc("%s dropped the remote! (butterfingers)" % t.display_name, Roster.TEAM_COLORS[t.team])
+	_cl_damaged.rpc(tid, t.hp, d * knock, stun, ambushed)
 	if t.hp <= 0:
 		_ko(t, a)
 
 
 func _ko(t: Player, by: Player) -> void:
-	_ko_timers[t.pid] = respawn_time
+	_ko_timers[t.pid] = respawn_time + float(t.data.get("reboot", 0.0))
 	stats[by.pid]["bonks"] += 1
 	if remote.state == TVRemote.State.CARRIED and remote.carrier_pid == t.pid:
 		_drop_remote(t.position)
@@ -493,9 +524,23 @@ const KO_VERBS: Array[String] = ["bonked", "booped", "flattened", "yeeted", "sat
 
 
 @rpc("authority", "call_local", "reliable")
-func _cl_damaged(tid: int, new_hp: int, knock: Vector2, stun: float) -> void:
+func _cl_damaged(tid: int, new_hp: int, knock: Vector2, stun: float, ambushed: bool) -> void:
 	if players.has(tid):
-		players[tid].on_damaged(new_hp, knock, stun)
+		players[tid].on_damaged(new_hp, knock, stun, ambushed)
+
+
+## Can players on `viewer_team` see `p` right now? Hidden characters show up
+## when someone on the viewing team with a nose or x-ray vision is close.
+func is_revealed(p: Player, viewer_team: int) -> bool:
+	if not p.stealthed or p.team == viewer_team:
+		return true
+	for q: Player in players.values():
+		if q.team != viewer_team or q.is_ko:
+			continue
+		var r := float(q.data.get("reveal", 0.0))
+		if r > 0.0 and Iso.fdist(q.position, p.position) <= r:
+			return true
+	return false
 
 
 @rpc("authority", "call_local", "reliable")
@@ -617,11 +662,28 @@ func _cl_mess_progress(idx: int, progress: float, helpers: int) -> void:
 		item.apply_state(true, item.offset, progress, helpers)
 
 
+## How fast this character tidies right now (Bass's playlist speeds up everyone near it).
+func _tidy_power(p: Player) -> float:
+	var power := float(p.data["tidy"])
+	for q: Player in players.values():
+		if q.data.get("playlist", false) and Iso.fdist(q.position, p.position) <= 80.0:
+			return power * 1.3
+	return power
+
+
+## Handy and strong characters count as two pairs of hands.
+func _lift(p: Player) -> int:
+	return 2 if p.data.get("strong", false) or p.data.get("handy", false) else 1
+
+
 func _tick_cleanup(delta: float) -> void:
 	_progress_sync_t += delta
 	var send := _progress_sync_t >= 0.1
 	if send:
 		_progress_sync_t = 0.0
+	for f in level.furniture:
+		if f.wrecked:
+			_tick_rebuild(f, delta, send)
 	for item in level.mess_items:
 		if not item.knocked:
 			continue
@@ -630,8 +692,8 @@ func _tick_cleanup(delta: float) -> void:
 		var fixers: Array[Player] = []
 		for p: Player in players.values():
 			if p.interacting and Iso.fdist(p.position, item.position) <= FIX_RADIUS:
-				lift += 2 if p.data.get("strong", false) else 1
-				power += float(p.data["tidy"])
+				lift += _lift(p)
+				power += _tidy_power(p)
 				fixers.append(p)
 		if lift >= item.required_lift():
 			item.progress += delta * power / item.fix_time()
@@ -645,9 +707,116 @@ func _tick_cleanup(delta: float) -> void:
 			_cl_mess_progress.rpc(item.index, item.progress, lift)
 
 
+# =============================================================== furniture
+
+func report_furniture_hit(f: Furniture, amount: float) -> void:
+	if amount <= 0.0 or not f.can_be_damaged() or phase != Phase.WAR:
+		return
+	if multiplayer.is_server():
+		_srv_furniture_hit(f.index, amount)
+	else:
+		_srv_furniture_hit.rpc_id(1, f.index, amount)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _srv_furniture_hit(idx: int, amount: float) -> void:
+	if not multiplayer.is_server() or phase != Phase.WAR or idx < 0 or idx >= level.furniture.size():
+		return
+	var f := level.furniture[idx]
+	if not f.can_be_damaged():
+		return
+	f.hp = maxf(0.0, f.hp - clampf(amount, 0.0, 120.0))
+	var now_wrecked := f.hp <= 0.0
+	_cl_furniture_state.rpc(idx, f.hp / f.max_hp, now_wrecked, 0.0, 0)
+	if now_wrecked:
+		_spawn_debris("scorch", f.position)
+		_cl_event.rpc("The %s is destroyed!" % _furniture_name(f), Color("ffb347"))
+
+
+@rpc("authority", "call_local", "reliable")
+func _cl_furniture_state(idx: int, hp_frac: float, wrecked: bool, progress: float, helpers: int) -> void:
+	var f := level.furniture[idx]
+	var was_wrecked := f.wrecked
+	f.apply_state(hp_frac, wrecked, progress, helpers)
+	if wrecked != was_wrecked:
+		Fx.boom(level.entities, f.position, f.reach(), false)
+		_nav_dirty = true
+		if wrecked:
+			log_event("wrecked %s" % f.name)
+
+
+@rpc("authority", "call_local", "unreliable_ordered")
+func _cl_furniture_progress(idx: int, progress: float, helpers: int) -> void:
+	var f := level.furniture[idx]
+	if f.wrecked:
+		f.apply_state(0.0, true, progress, helpers)
+
+
+func _tick_rebuild(f: Furniture, delta: float, send: bool) -> void:
+	var lift := 0
+	var power := 0.0
+	var fixers: Array[Player] = []
+	for p: Player in players.values():
+		if p.interacting and Iso.fdist(p.position, f.position) <= FIX_RADIUS + f.reach():
+			lift += _lift(p)
+			power += _tidy_power(p)
+			fixers.append(p)
+	if lift >= f.required_lift():
+		f.rebuild += delta * power / f.rebuild_time()
+	f.helpers = lift
+	if f.rebuild >= 1.0:
+		for p in fixers:
+			stats[p.pid]["fixes"] += 2
+		_cl_furniture_state.rpc(f.index, 1.0, false, 0.0, 0)
+		_cl_event.rpc("%s rebuilt the %s!" % [fixers[0].display_name, _furniture_name(f)], Color("8ff0a4"))
+	elif send:
+		_cl_furniture_progress.rpc(f.index, f.rebuild, lift)
+
+
+## Bots re-plan around wrecked (or rebuilt) furniture, at most a few times a second.
+func _tick_navigation(delta: float) -> void:
+	_nav_t -= delta
+	if _nav_dirty and _nav_t <= 0.0:
+		_nav_dirty = false
+		_nav_t = 0.5
+		level.rebuild_navigation()
+
+
+static func _furniture_name(f: Furniture) -> String:
+	if f.style != Furniture.Style.BOX:
+		return String(Furniture.Style.keys()[f.style]).to_lower().replace("_", " ")
+	var n := String(f.name).rstrip("0123456789")
+	for suffix in ["Pets", "Robots", "Left", "Right", "Back", "Front"]:
+		n = n.trim_suffix(suffix)
+	return n.capitalize().to_lower()
+
+
+## Explosions leave scorch marks and egg splats behind.
+func report_decal(pos: Vector2, decal: String) -> void:
+	if decal == "" or phase != Phase.WAR:
+		return
+	if multiplayer.is_server():
+		_srv_decal(pos, decal)
+	else:
+		_srv_decal.rpc_id(1, pos, decal)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _srv_decal(pos: Vector2, decal: String) -> void:
+	if not multiplayer.is_server() or phase != Phase.WAR or not decal in ["scorch", "yolk"]:
+		return
+	# One mark per spot; repeated blasts in the same place don't stack up.
+	for d: Debris in debris.values():
+		if d.kind == decal and Iso.fdist(d.position, pos) < 14.0:
+			return
+	_spawn_debris(decal, pos)
+
+
 # ================================================================== debris
 
 func _spawn_debris(kind: String, pos: Vector2) -> void:
+	if debris.size() >= MAX_DEBRIS:
+		return
 	var id := _next_debris_id
 	_next_debris_id += 1
 	var jitter := Iso.to_screen(Vector2(randf_range(-6, 6), randf_range(-6, 6)))
@@ -699,16 +868,16 @@ func _tick_debris(delta: float) -> void:
 			if p.is_ko:
 				continue
 			var dist := Iso.fdist(p.position, d.position)
-			if phase == Phase.CLEANUP and p.data.get("vacuum", false) and dist <= 10.0:
+			if phase == Phase.CLEANUP and p.data.get("vacuum", false) and dist <= 10.0 and d.kind in ["fur", "bolts"]:
 				power = 100.0  # Zoomba just hoovers it up.
 				cleaner = p
 				break
 			if phase == Phase.CLEANUP and p.interacting and dist <= DEBRIS_RADIUS:
-				power += float(p.data["tidy"])
+				power += _tidy_power(p)
 				cleaner = p
 		if power <= 0.0:
 			continue
-		d.progress += delta * power / Debris.CLEAN_TIME
+		d.progress += delta * power / d.clean_time
 		if d.progress >= 1.0:
 			if phase == Phase.CLEANUP and cleaner:
 				stats[cleaner.pid]["fixes"] += 1

@@ -4,6 +4,10 @@ extends StaticBody2D
 ## Solid furniture drawn as simple isometric boxes, so it can be resized and
 ## recoloured right in the inspector. The node's origin is the centre of its
 ## footprint on the floor. Walkers bump into it; flyers pass over it.
+##
+## Most furniture can be wrecked during the war (weapons, explosions, and
+## characters being launched into it) and has to be rebuilt during cleanup.
+## The host owns its health; every peer mirrors it through apply_state().
 
 enum Style { BOX, ARMCHAIR, COUCH, TABLE, TV, CAT_TREE, DOCK, BED, COUNTER, STOVE, FRIDGE, DESK, BEANBAG, WALL, PET_BED }
 enum Detail { NONE, SINK, BURNERS }
@@ -45,6 +49,9 @@ enum Detail { NONE, SINK, BURNERS }
 		detail = v
 		queue_redraw()
 @export var solid := true
+## How much punishment it takes before it's wrecked.
+## -1 picks a value for the style; 0 makes it indestructible.
+@export var sturdiness := -1.0
 
 ## For Style.TV: -1 = off, otherwise the team whose show is on.
 var channel := -1:
@@ -53,17 +60,99 @@ var channel := -1:
 		queue_redraw()
 
 const OUTLINE := Color("3b2a30")
+const STURDINESS := {
+	Style.BOX: 40.0, Style.ARMCHAIR: 55.0, Style.COUCH: 80.0, Style.TABLE: 40.0, Style.TV: 0.0,
+	Style.CAT_TREE: 0.0, Style.DOCK: 0.0, Style.BED: 80.0, Style.COUNTER: 90.0, Style.STOVE: 0.0,
+	Style.FRIDGE: 110.0, Style.DESK: 45.0, Style.BEANBAG: 20.0, Style.WALL: 60.0, Style.PET_BED: 0.0,
+}
+
+var index := -1
+var max_hp := 0.0
+var hp := 0.0
+var wrecked := false
+## 0..1 progress of putting it back together during cleanup.
+var rebuild := 0.0
+var helpers := 0
 
 var _boxes: Array[Dictionary] = []
+var _poly: CollisionPolygon2D
+var _overlay: Node2D
+var _t := 0.0
 
 
 func _ready() -> void:
 	collision_layer = 2
 	collision_mask = 0
-	if not Engine.is_editor_hint() and solid:
-		var poly := CollisionPolygon2D.new()
-		poly.polygon = Iso.footprint(size * 0.92)
-		add_child(poly)
+	max_hp = sturdiness if sturdiness >= 0.0 else float(STURDINESS.get(style, 60.0))
+	hp = max_hp
+	if Engine.is_editor_hint():
+		return
+	if solid:
+		_poly = CollisionPolygon2D.new()
+		_poly.polygon = Iso.footprint(size * 0.92)
+		add_child(_poly)
+	_overlay = Node2D.new()
+	_overlay.z_index = 20
+	_overlay.draw.connect(_draw_overlay)
+	add_child(_overlay)
+
+
+func can_be_damaged() -> bool:
+	return solid and max_hp > 0.0 and not wrecked
+
+
+## Roughly how far the footprint reaches from its centre, in floor pixels.
+func reach() -> float:
+	return maxf(size.x, size.y) * 11.3
+
+
+## How much a wreck counts against the house's tidiness.
+func weight() -> float:
+	return 2.0 + size.x * size.y
+
+
+func rebuild_time() -> float:
+	return 4.0 + size.x * size.y * 1.5
+
+
+func required_lift() -> int:
+	return 2
+
+
+## Mirrors the host's view: health fraction, wrecked or not, rebuild progress.
+func apply_state(hp_frac: float, is_wrecked: bool, progress: float, new_helpers: int) -> void:
+	hp = hp_frac * max_hp
+	rebuild = progress
+	helpers = new_helpers
+	if is_wrecked != wrecked:
+		wrecked = is_wrecked
+		if _poly:
+			_poly.set_deferred("disabled", wrecked)
+	queue_redraw()
+	if _overlay:
+		_overlay.queue_redraw()
+
+
+func _process(delta: float) -> void:
+	if Engine.is_editor_hint() or not wrecked:
+		return
+	_t += delta
+	_overlay.queue_redraw()
+
+
+func _draw_overlay() -> void:
+	if not wrecked or Match.current == null or Match.current.phase != Match.Phase.CLEANUP:
+		return
+	var top := Vector2(0, -18)
+	var bob := sin(_t * 5.0) * 1.5
+	var c := Color("ffd84d") if rebuild <= 0.0 else Color("8ff0a4")
+	_overlay.draw_colored_polygon(PackedVector2Array([top + Vector2(-4, bob - 5), top + Vector2(4, bob - 5), top + Vector2(0, bob)]), c)
+	if helpers < required_lift():
+		_overlay.draw_string(ThemeDB.fallback_font, top + Vector2(-5, bob - 7), "x2", HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color.WHITE)
+	if rebuild > 0.0:
+		var bar := Rect2(top + Vector2(-10, 2), Vector2(20, 3))
+		_overlay.draw_rect(bar.grow(1), OUTLINE)
+		_overlay.draw_rect(Rect2(bar.position, Vector2(bar.size.x * rebuild, bar.size.y)), Color("8ff0a4"))
 
 
 ## This piece's own (i, j) axes -> the room's tile axes, honouring flip/mirror.
@@ -81,6 +170,9 @@ func _draw() -> void:
 	var w := size.y if mirror else size.x
 	var d := size.x if mirror else size.y
 	_boxes.clear()
+	if wrecked:
+		_draw_rubble(w, d)
+		return
 	match style:
 		Style.BOX:
 			_box(Vector2.ZERO, Vector2(w, d), 0, height, color)
@@ -138,6 +230,38 @@ func _draw() -> void:
 			pass  # Drawn in _draw_details.
 	_flush_boxes()
 	_draw_details(w, d)
+	if max_hp > 0.0 and hp < max_hp * 0.66:
+		_draw_cracks(w, d)
+
+
+## What's left after the war: a heap of broken pieces.
+func _draw_rubble(w: float, d: float) -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(name)
+	draw_colored_polygon(Iso.footprint(size * 0.9), Color(0, 0, 0, 0.18))
+	for k in 5:
+		var at := Vector2(rng.randf_range(-0.32, 0.32) * w, rng.randf_range(-0.32, 0.32) * d)
+		var piece := Vector2(rng.randf_range(0.18, 0.4) * w, rng.randf_range(0.18, 0.4) * d)
+		var tone := color.darkened(rng.randf_range(0.05, 0.3)) if k != 2 else accent.darkened(0.2)
+		_box(at, piece, 0.0, rng.randf_range(2.0, 5.0), tone)
+	_flush_boxes()
+	for k in 4:
+		var p := _pt(rng.randf_range(-0.4, 0.4) * w, rng.randf_range(-0.4, 0.4) * d, 1.0)
+		draw_line(p, p + Vector2(rng.randf_range(-4, 4), rng.randf_range(-3, 1)), color.lightened(0.3), 1.0)
+
+
+## Cracks that spread as it takes damage.
+func _draw_cracks(w: float, d: float) -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(name) + 7
+	var count := 1 if hp > max_hp * 0.33 else 3
+	for k in count:
+		var p := _pt(rng.randf_range(-0.3, 0.3) * w, rng.randf_range(-0.3, 0.3) * d, height * rng.randf_range(0.5, 1.0))
+		var pts := PackedVector2Array([p])
+		for s in 3:
+			p += Vector2(rng.randf_range(-3, 3), rng.randf_range(1, 3))
+			pts.append(p)
+		draw_polyline(pts, Color(0.1, 0.07, 0.09, 0.75), 1.0)
 
 
 func _draw_details(w: float, d: float) -> void:

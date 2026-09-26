@@ -7,12 +7,13 @@ pulls back into the driveway.
 
 ![Pets and robots fighting over the remote in the living room](docs/images/war.gif)
 
-**Phase 1: War for the remote.** Team capture-the-flag. Grab the remote, carry
-it to your team's rug, and hold it there for two seconds to change the channel.
-Bonk anyone who tries. KOs are just naps.
+**Phase 1: War for the remote.** Team capture-the-flag with over-the-top weapons.
+Grab the remote, carry it to your team's rug, and hold it there for two seconds to
+change the channel. Blast anyone who tries, and the furniture too. KOs are just naps.
 
 **Phase 2: Cover it up.** *CAR IN THE DRIVEWAY!* Truce. Everyone, both teams,
-stands lamps back up, sweeps up fur and bolts, and returns the remote. The war's
+rebuilds the wrecked furniture, stands lamps back up, scrubs the scorch marks and
+returns the remote. The war's
 winners only get to watch their show if the house passes inspection. Otherwise
 everybody is grounded.
 
@@ -37,12 +38,25 @@ The full design (rules, roster, homes, art direction, networking, roadmap) is in
 
 ## The characters
 
-| Team Pets | | Team Robots | |
+Everyone gets a ridiculous weapon, one big strength and one real weakness. The
+pets are sneaky and chaotic, the robots have sensors and are great at repairs.
+
+| Team Pets | Weapon | + Strength | - Weakness |
 |---|---|---|---|
-| **Willow**, tabby cat | fast; *Pounce* | **Zoomba**, robot vacuum | fast; *Turbo Suck* pulls enemies and the remote |
-| **Biscuit**, chonky cat | tank; *Belly Flop* | **Unit-7**, helper bot | tank; *Rocket Fist* |
-| **Pepper**, pup | bruiser; *Big Bark* stuns | **The Claw**, ceiling gantry | flies; *Claw Drop* from above |
-| **Kiwi**, budgie | flies; *Feather Flurry* | **Bass**, smart speaker | support; *Hype Track* heals |
+| **Willow**, tabby cat | Laser Pointer Blaster | Invisible when still; *Vanish*; double-damage ambushes | Fragile |
+| **Biscuit**, chonky cat | Catnip Bazooka | Heavy (half knockback), sneaky | Slow |
+| **Pepper**, pup | Tennis Ball Gatling | Nose sniffs out hidden enemies | Butterfingers: drops the remote when hit |
+| **Kiwi**, budgie | Egg Bombs | Flies over furniture | Featherweight |
+
+| Team Robots | Weapon | + Strength | - Weakness |
+|---|---|---|---|
+| **Zoomba**, robot vacuum | Dust Cannon | Hides under furniture for ambushes | Flips over when hit hard |
+| **Unit-7**, helper bot | Toaster Cannon | X-ray vision; rebuilds twice as fast | Clunky |
+| **The Claw**, ceiling gantry | Wrecking Ball | Rides the ceiling; lifts heavy things alone | Long reboot after a KO |
+| **Bass**, smart speaker | Subwoofer Cannon | Cleaning playlist speeds up the team's tidying | No legs: tiny dash |
+
+Furniture has health: the wrecking ball, bazooka and friends reduce couches, tables
+and walls to rubble, which has to be rebuilt before the parents get home.
 
 ![All the placeholder sprites](docs/images/sprites.png)
 
@@ -61,7 +75,7 @@ add or remove them in the lobby.
 | | Keyboard | Gamepad |
 |---|---|---|
 | Move | WASD / arrows | left stick |
-| Attack | J | X |
+| Attack (hold for automatic weapons) | J | X |
 | Special | K | Y |
 | Dash | Space | A |
 | Throw the remote / hold to tidy | E | B |

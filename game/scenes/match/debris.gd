@@ -1,19 +1,26 @@
 class_name Debris
 extends Node2D
-## Fur tufts (pets) and loose bolts (robots) left behind by every KO.
-## More fighting now means more sweeping later.
+## Mess on the floor that has to be cleaned up: fur tufts (pets) and loose
+## bolts (robots) from every KO, scorch marks from explosions, egg splats.
+## More fighting now means more scrubbing later.
 
-const CLEAN_TIME := 0.8
+const CLEAN_TIMES := {"fur": 0.8, "bolts": 0.8, "scorch": 1.2, "yolk": 1.0}
 
 var debris_id := 0
+var kind := "fur"
 var progress := 0.0
+var clean_time := 0.8
 var _sprite: Sprite2D
 
 
 func setup(id: int, sprite_name: String, pos: Vector2) -> void:
 	debris_id = id
+	kind = sprite_name
+	clean_time = CLEAN_TIMES.get(sprite_name, 0.8)
 	name = "Debris_%d" % id
 	position = pos
+	# Flat on the floor, under everyone's feet.
+	z_index = -1
 	_sprite = Sprite2D.new()
 	_sprite.texture = Roster.texture(sprite_name)
 	_sprite.position = Vector2(0, -1)

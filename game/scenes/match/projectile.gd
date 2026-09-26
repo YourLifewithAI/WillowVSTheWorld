@@ -1,75 +1,149 @@
 class_name Projectile
 extends Node2D
-## Feathers, barks and rocket fists. Every peer flies its own copy; only the
-## shooter's owner (the "authoritative" copy) checks for hits and reports them.
+## Every shot, shell, egg and bark. Every peer flies its own copy (the owner
+## only sends the direction); the shooter's owner holds the "authoritative"
+## copy, which checks what it hits and reports that to the host.
+##
+## Straight shots stop at the first piece of furniture in their way (and chip
+## at it), unless fired from the air or marked `through_walls`. Lobbed shells
+## sail over everything and explode where they land.
 
 const HEIGHT := 9.0
 
 var shooter: Player
-var dir := Vector2.RIGHT
+var ability := 0
 var spec: Dictionary = {}
+var dir := Vector2.RIGHT
 var authoritative := false
+var ambush := false
 var proj_id := 0
+var lob := false
+var z := HEIGHT
+var _start_z := HEIGHT
 var _travelled := 0.0
 var _hit: Dictionary = {}
 var _sprite: Sprite2D
 var _t := 0.0
+var _done := false
+
+const SPRITES := {"ball": "p_ball", "rocket": "p_rocket", "egg": "p_egg", "toast": "p_toast",
+	"feather": "feather", "rocket_fist": "rocket_fist"}
 
 
-func setup(from: Player, direction: Vector2, id: int, is_authoritative: bool) -> void:
+func setup(from: Player, which: int, direction: Vector2, id: int, is_authoritative: bool, from_ambush: bool) -> void:
 	shooter = from
+	ability = which
+	spec = Roster.ability(from.data, which)
 	dir = direction.normalized()
-	spec = from.data["special"]
 	authoritative = is_authoritative
+	ambush = from_ambush
 	proj_id = id
+	lob = which == 0 and int(spec["kind"]) == Roster.Weapon.LOB
 	name = "Proj_%d_%d" % [from.pid, id]
-	position = from.position + Iso.to_screen(dir * 8.0)
+	position = from.position + Iso.to_screen(dir * (3.0 if lob else 8.0))
+	_start_z = maxf(from.z, 8.0) if lob else HEIGHT + from.z * 0.5
+	z = _start_z
 
 
 func _ready() -> void:
-	var sprite_name: String = spec.get("sprite", "")
-	if sprite_name != "":
+	var look: String = spec.get("look", "")
+	if SPRITES.has(look):
 		_sprite = Sprite2D.new()
-		_sprite.texture = Roster.texture(sprite_name)
-		_sprite.position = Vector2(0, -HEIGHT)
-		_sprite.rotation = Iso.to_screen(dir).angle()
+		_sprite.texture = Roster.texture(SPRITES[look])
+		_sprite.rotation = Iso.to_screen(dir).angle() if look in ["rocket", "feather", "rocket_fist"] else 0.0
 		add_child(_sprite)
 
 
+func _arena() -> Match:
+	return shooter.arena if is_instance_valid(shooter) else null
+
+
 func _physics_process(delta: float) -> void:
+	var arena := _arena()
+	if arena == null or _done:
+		queue_free()
+		return
 	_t += delta
 	var step := dir * float(spec["speed"]) * delta
 	position += Iso.to_screen(step)
 	_travelled += step.length()
-	var arena: Match = shooter.arena if is_instance_valid(shooter) else null
-	if arena == null or _travelled >= float(spec["range"]) or not arena.level.room.contains(position, 0.1):
+	var reach := float(spec["range"])
+	if lob:
+		var k := clampf(_travelled / reach, 0.0, 1.0)
+		z = _start_z * (1.0 - k) + float(spec.get("arc", 0.0)) * 4.0 * k * (1.0 - k)
+		if k >= 1.0 or not arena.level.room.contains(position, 0.05):
+			_explode(arena)
+		queue_redraw()
+		return
+	if _travelled >= reach or not arena.level.room.contains(position, 0.05):
 		queue_free()
 		return
 	queue_redraw()
+
+	# Furniture in the way.
+	if not shooter.data.get("flying", false):
+		var f := arena.level.furniture_at(position)
+		if f and not _hit.has(f):
+			_hit[f] = true
+			if authoritative:
+				arena.report_furniture_hit(f, float(spec.get("demolition", 0.0)))
+			if not spec.get("through_walls", false):
+				Fx.burst(arena.level.entities, position + Vector2(0, -z), Color.WHITE)
+				queue_free()
+				return
 	if not authoritative:
 		return
-	var reach := float(spec["hit_radius"]) + Player.BODY_RADIUS
+	var hit_reach := float(spec["hit_radius"]) + Player.BODY_RADIUS
 	for other: Player in arena.players.values():
 		if other.team == shooter.team or other.is_ko or _hit.has(other.pid):
 			continue
-		if Iso.fdist(position, other.position) <= reach:
+		if Iso.fdist(position, other.position) <= hit_reach:
 			_hit[other.pid] = true
-			arena.report_hit(shooter, other, 1, dir)
+			arena.report_hit(shooter, other, ability, dir, ambush)
 			if not spec.get("pierce", false):
 				shooter.despawn_projectile.rpc(proj_id)
 				return
 	for item in arena.level.mess_items:
-		if not _hit.has(-1000 - item.index) and Iso.fdist(position, item.position) <= reach:
-			_hit[-1000 - item.index] = true
+		if not _hit.has(item) and Iso.fdist(position, item.position) <= hit_reach:
+			_hit[item] = true
 			arena.report_mess_hit(item, float(spec["knock"]), Iso.to_floor(item.position - position))
 
 
+func _explode(arena: Match) -> void:
+	_done = true
+	var radius := float(spec.get("explode_radius", 16.0))
+	Fx.boom(arena.level.entities, position, radius, spec.get("look", "") == "egg")
+	if authoritative:
+		shooter.hit_area(position, radius, ability, float(spec["knock"]), float(spec.get("demolition", 0.0)), ambush)
+		arena.report_decal(position, spec.get("decal", ""))
+	queue_free()
+
+
 func _draw() -> void:
-	draw_colored_polygon(Iso.ellipse(3.0, 10), Color(0, 0, 0, 0.2))
-	if _sprite == null:
-		# Big Bark: expanding sound arcs.
-		var a := Iso.to_screen(dir).angle()
-		var c := Color("ffe9a8")
-		for k in 3:
-			var r := 4.0 + k * 4.0 + fmod(_t * 30.0, 4.0)
-			draw_arc(Vector2(0, -HEIGHT), r, a - 0.9, a + 0.9, 8, Color(c, 1.0 - k * 0.25), 2.0)
+	var look: String = spec.get("look", "")
+	draw_colored_polygon(Iso.ellipse(2.5 if look != "ring" else 5.0, 10), Color(0, 0, 0, 0.2))
+	var at := Vector2(0, round(-z))
+	var a := Iso.to_screen(dir).angle()
+	if _sprite:
+		_sprite.position = at
+		if look == "toast" or look == "egg":
+			_sprite.rotation = _t * 14.0 if look == "toast" else 0.0
+	match look:
+		"laser":
+			var back := Iso.to_screen(-dir) * 10.0
+			draw_line(at, at + back, Color(1, 0.2, 0.25, 0.9), 2.0)
+			draw_line(at, at + back * 0.6, Color(1, 0.9, 0.9), 1.0)
+		"dust":
+			var r := 2.0 + _t * 14.0
+			draw_circle(at, r + 1.0, Color(0.55, 0.52, 0.5, 0.5))
+			draw_circle(at + Vector2(-1, -1), r, Color(0.85, 0.82, 0.78, 0.8))
+		"ring":
+			for k in 2:
+				var rr := 5.0 + k * 4.0 + fmod(_t * 30.0, 4.0)
+				draw_arc(at, rr, a - 1.0, a + 1.0, 10, Color(0.38, 0.95, 1.0, 0.9 - k * 0.3), 2.0)
+		"bark":
+			for k in 3:
+				var rr := 4.0 + k * 4.0 + fmod(_t * 30.0, 4.0)
+				draw_arc(at, rr, a - 0.9, a + 0.9, 8, Color(1.0, 0.91, 0.66, 1.0 - k * 0.25), 2.0)
+		"rocket":
+			draw_circle(at - Iso.to_screen(dir) * 5.0, 1.5 + sin(_t * 40.0), Color("ffd84d"))

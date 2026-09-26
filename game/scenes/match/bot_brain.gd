@@ -75,13 +75,16 @@ func _war(inp: Dictionary, delta: float) -> void:
 		return
 	var dist := Iso.fdist(foe.position, me.position)
 	var to_foe := Iso.to_floor(foe.position - me.position).normalized()
-	var atk: Dictionary = me.data["attack"]
-	if not me.carrying and dist <= float(atk["range"]) + 6.0:
-		# Turn to face them, then swing (with a little human-ish delay).
-		inp["move"] = to_foe * 0.3
-		if absf(rad_to_deg(me.facing.angle_to(to_foe))) < 40.0 and me.attack_cd <= 0.0:
+	var w: Dictionary = me.data["weapon"]
+	var kind := int(w["kind"])
+	if not me.carrying and _in_weapon_range(w, dist):
+		# Turn to face them, then fire (with a little human-ish delay).
+		inp["move"] = to_foe * (0.3 if kind == Roster.Weapon.MELEE else 0.25)
+		if absf(rad_to_deg(me.facing.angle_to(to_foe))) < 30.0 and me.attack_cd <= 0.0:
 			inp["attack"] = true
-			_hesitate = randf_range(0.05, 0.25)
+			inp["attack_held"] = true
+			if float(w["cooldown"]) >= 0.2:
+				_hesitate = randf_range(0.05, 0.25)
 	if not me.carrying and me.special_cd <= 0.0 and _special_makes_sense(foe, dist, to_foe):
 		inp["special"] = true
 		_hesitate = 0.3
@@ -89,7 +92,6 @@ func _war(inp: Dictionary, delta: float) -> void:
 		inp["dash"] = true
 
 
-## The two teammates nearest the remote go for it; everyone else hunts.
 ## A teammate nearer our base than us, not too far away, to throw to.
 func _open_teammate() -> Player:
 	var base := arena.level.bases[me.team].position
@@ -103,6 +105,7 @@ func _open_teammate() -> Player:
 	return null
 
 
+## The two teammates nearest the remote go for it; everyone else hunts.
 func _is_runner() -> bool:
 	var mine := Iso.fdist(me.position, arena.remote.position)
 	var closer := 0
@@ -112,12 +115,27 @@ func _is_runner() -> bool:
 	return closer < 2
 
 
+func _in_weapon_range(w: Dictionary, dist: float) -> bool:
+	match int(w["kind"]):
+		Roster.Weapon.MELEE:
+			return dist <= float(w["range"]) + 6.0
+		Roster.Weapon.SHOT:
+			return dist <= float(w["range"]) * 0.85
+		Roster.Weapon.LOB:
+			# Shells land at a fixed distance, so stand about that far away.
+			var land := float(w["range"])
+			var blast := float(w["explode_radius"])
+			var lo := land * 0.55 if land > 30.0 else 0.0
+			return dist >= lo and dist <= land + blast * 0.7
+	return false
+
+
 func _special_makes_sense(foe: Player, dist: float, to_foe: Vector2) -> bool:
 	var sp: Dictionary = me.data["special"]
 	var aimed := absf(rad_to_deg(me.facing.angle_to(to_foe))) < 20.0
 	match int(sp["kind"]):
-		Roster.Special.LEAP:
-			return aimed and dist < float(sp["distance"]) * 0.9 and dist > 25.0
+		Roster.Special.VANISH:
+			return not me.stealthed and dist < 170.0 and dist > 50.0
 		Roster.Special.SLAM:
 			return dist < float(sp["radius"]) * 0.7
 		Roster.Special.PROJECTILE:
@@ -133,7 +151,8 @@ func _nearest_enemy(from: Vector2) -> Player:
 	var best: Player = null
 	var best_d := INF
 	for p: Player in arena.players.values():
-		if p.team == me.team or p.is_ko:
+		# Bots can't target what their team can't see.
+		if p.team == me.team or p.is_ko or not arena.is_revealed(p, me.team):
 			continue
 		var d := Iso.fdist(p.position, from)
 		if d < best_d:
@@ -163,6 +182,16 @@ func _cleanup(inp: Dictionary, delta: float) -> void:
 		goal_radius = 0.0
 	else:
 		var best_score := INF
+		for f in arena.level.furniture:
+			if not f.wrecked:
+				continue
+			var fd := Iso.fdist(f.position, me.position)
+			var f_busy: bool = f.helpers >= f.required_lift() and fd > Match.FIX_RADIUS + f.reach()
+			var f_score := fd - 60.0 + (120.0 if f_busy else 0.0)
+			if f_score < best_score:
+				best_score = f_score
+				goal_pos = f.position
+				goal_radius = Match.FIX_RADIUS * 0.6 + f.reach()
 		for item in arena.level.mess_items:
 			if not item.knocked:
 				continue

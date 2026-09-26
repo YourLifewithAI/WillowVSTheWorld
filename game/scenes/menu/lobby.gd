@@ -122,7 +122,7 @@ func _build() -> void:
 			b.focus_entered.connect(_show_detail.bind(id))
 			grid.add_child(b)
 			_char_buttons[id] = b
-	_detail = UiTheme.label("", 9)
+	_detail = UiTheme.label("", 8)
 	_detail.autowrap_mode = TextServer.AUTOWRAP_WORD
 	_detail.custom_minimum_size = Vector2(360, 60)
 	rcol.add_child(_detail)
@@ -139,10 +139,10 @@ func _pick(id: String) -> void:
 func _show_detail(id: String) -> void:
 	var c: Dictionary = Roster.get_char(id)
 	var sp: Dictionary = c["special"]
-	_detail.text = "%s the %s (%s)  —  %s\nHP %d · Speed %d%s\nAttack: %s   ·   Special: %s (%ds cooldown)\nCleanup: %s" % [
+	_detail.text = "%s the %s (%s): %s\nWeapon: %s   ·   Special: %s   ·   HP %d   ·   Speed %d\n+ %s\n- %s\nCleanup: %s" % [
 		c["name"], c["species"], c["role"], c["blurb"],
-		c["hp"], c["speed"], "  · Flies over furniture" if c["flying"] else "",
-		c["attack"]["name"], sp["name"], int(sp["cooldown"]), c["tidy_note"]]
+		c["weapon"]["name"], sp["name"], c["hp"], c["speed"],
+		c["strength"], c["weakness"], c["tidy_note"]]
 
 
 func _refresh() -> void:

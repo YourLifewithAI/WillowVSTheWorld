@@ -3,7 +3,7 @@ extends Node2D
 ## Tiny self-deleting effects: swipes, puffs, rings, pop-up text.
 ## Everything is drawn with primitives, so there are no assets to manage.
 
-enum Kind { SLASH, PUFF, RING, RING_IN, BURST, TEXT, NOTE, GHOST }
+enum Kind { SLASH, PUFF, RING, RING_IN, BURST, TEXT, NOTE, GHOST, BOOM, SWING }
 
 var kind: Kind = Kind.PUFF
 var life := 0.3
@@ -49,6 +49,21 @@ static func text(parent: Node, pos: Vector2, msg: String, c: Color) -> void:
 	var fx := _make(parent, Kind.TEXT, pos, c, 0.9)
 	fx.message = msg
 	fx.z_index = 40
+
+
+## A cartoon explosion (or a splat, for eggs).
+static func boom(parent: Node, pos: Vector2, r: float, splat: bool) -> void:
+	var fx := _make(parent, Kind.BOOM, pos, Color("fffdf0") if splat else Color("ffb347"), 0.35)
+	fx.radius = r
+	fx.z_index = 6
+
+
+## The wide arc of a big melee swing (the wrecking ball).
+static func swing(parent: Node, pos: Vector2, facing: Vector2, r: float, c: Color) -> void:
+	var fx := _make(parent, Kind.SWING, pos, c, 0.2)
+	fx.dir = facing
+	fx.radius = r
+	fx.z_index = 5
 
 
 static func note(parent: Node, pos: Vector2) -> void:
@@ -107,6 +122,24 @@ func _draw() -> void:
 			var c := Color(color, 1.0 - maxf(0.0, k - 0.6) / 0.4)
 			draw_string_outline(font, p, message, HORIZONTAL_ALIGNMENT_LEFT, -1, size, 2, Color(0.17, 0.11, 0.16, c.a))
 			draw_string(font, p, message, HORIZONTAL_ALIGNMENT_LEFT, -1, size, c)
+		Kind.BOOM:
+			var r := radius * (0.4 + k * 0.8)
+			var ring := Iso.ellipse(r, 24)
+			ring.append(ring[0])
+			draw_polyline(ring, Color(color, 1.0 - k), 2.0)
+			draw_circle(Vector2(0, -4 - k * 6.0), radius * 0.45 * (1.0 - k), Color(color, 0.9 * (1.0 - k)))
+			draw_circle(Vector2(0, -4 - k * 6.0), radius * 0.25 * (1.0 - k), Color(1, 1, 0.85, 1.0 - k))
+			for i in 7:
+				var v := Vector2.from_angle(TAU * i / 7.0 + 0.4)
+				var p0 := Iso.to_screen(v * r * 0.6) + Vector2(0, -3)
+				draw_line(p0, p0 + Iso.to_screen(v * 6.0) + Vector2(0, -3), Color(color, 1.0 - k), 1.0)
+		Kind.SWING:
+			var a := Iso.to_screen(dir).angle()
+			var pts := PackedVector2Array()
+			for i in 13:
+				var ang := a - 1.75 + 3.5 * i / 12.0
+				pts.append(Vector2(cos(ang) * radius, sin(ang) * radius * 0.5 - 6.0))
+			draw_polyline(pts, Color(color, 1.0 - k), 3.0)
 		Kind.NOTE:
 			var p := Vector2(sin(_t * 8.0) * 2.0, -8.0 - k * 14.0)
 			var c := Color(color, 1.0 - k)

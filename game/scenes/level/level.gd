@@ -14,6 +14,7 @@ extends Node2D
 @onready var bases: Array[BaseZone] = [$Zones/PetsBase, $Zones/RobotsBase]
 
 var mess_items: Array[MessItem] = []
+var furniture: Array[Furniture] = []
 var tv: Furniture
 var nav_region: NavigationRegion2D
 
@@ -25,9 +26,33 @@ func _ready() -> void:
 		if n is MessItem:
 			n.index = mess_items.size()
 			mess_items.append(n)
-		elif n is Furniture and n.style == Furniture.Style.TV:
-			tv = n
-	_build_navigation()
+		elif n is Furniture:
+			n.index = furniture.size()
+			furniture.append(n)
+			if n.style == Furniture.Style.TV:
+				tv = n
+	NavigationServer2D.map_set_cell_size(get_world_2d().navigation_map, NAV_CELL)
+	nav_region = NavigationRegion2D.new()
+	nav_region.name = "Navigation"
+	nav_region.navigation_polygon = _bake_navigation()
+	add_child(nav_region)
+
+
+## Re-bakes the bots' map after furniture is wrecked or rebuilt.
+func rebuild_navigation() -> void:
+	nav_region.navigation_polygon = _bake_navigation()
+
+
+## The standing (solid, not wrecked) furniture at a point, if any.
+func furniture_at(p: Vector2) -> Furniture:
+	var query := PhysicsPointQueryParameters2D.new()
+	query.position = to_global(p)
+	query.collision_mask = 2
+	for hit in get_world_2d().direct_space_state.intersect_point(query, 4):
+		var f := hit["collider"] as Furniture
+		if f and not f.wrecked:
+			return f
+	return null
 
 
 ## Where to put this level so the room sits in the middle of a view of `view_size`.
@@ -47,10 +72,9 @@ func clamp_to_floor(p: Vector2, margin: float = 0.4) -> Vector2:
 	return Iso.tile_to_local(t)
 
 
-## Bakes a navigation mesh for the bots: the whole floor minus solid furniture.
-func _build_navigation() -> void:
-	# A coarser 2 px grid keeps the mesh simple enough to merge cleanly.
-	NavigationServer2D.map_set_cell_size(get_world_2d().navigation_map, NAV_CELL)
+## Bakes a navigation mesh for the bots: the whole floor minus standing furniture.
+## A coarse 2 px grid keeps the mesh simple enough to merge cleanly.
+func _bake_navigation() -> NavigationPolygon:
 	var nav_poly := NavigationPolygon.new()
 	nav_poly.cell_size = NAV_CELL
 	nav_poly.agent_radius = 5.0
@@ -64,7 +88,7 @@ func _build_navigation() -> void:
 	# outline first; separate touching outlines leave slivers in the mesh.
 	var obstacles: Array[PackedVector2Array] = []
 	for n in entities.get_children():
-		if n is Furniture and n.solid:
+		if n is Furniture and n.solid and not n.wrecked:
 			var merged := Transform2D(0, n.position) * Iso.footprint(n.size + Vector2(0.1, 0.1))
 			var k := 0
 			while k < obstacles.size():
@@ -79,10 +103,7 @@ func _build_navigation() -> void:
 	for outline in obstacles:
 		source.add_obstruction_outline(_simplify(outline))
 	NavigationServer2D.bake_from_source_geometry_data(nav_poly, source)
-	nav_region = NavigationRegion2D.new()
-	nav_region.name = "Navigation"
-	nav_region.navigation_polygon = nav_poly
-	add_child(nav_region)
+	return nav_poly
 
 
 ## Drops points that sit on a straight line between their neighbours.

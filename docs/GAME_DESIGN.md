@@ -1,6 +1,6 @@
 # Willow VS The World: Game Design Document
 
-*Living document. Version 0.2: the first playable prototype, now with four homes.*
+*Living document. Version 0.3: four homes, over-the-top weapons, stealth, and furniture you can destroy.*
 
 ## The pitch
 
@@ -14,13 +14,15 @@ Two phases, one afternoon:
 2. **Cover it up.** A car door slams in the driveway. Truce! Everyone, both teams,
    races to put the house back together before the parents walk in.
 
-The winners of the war only get to watch their show if the house passes inspection.
-Trash the place too hard and *everyone* is grounded.
+The joke: they basically destroy the whole house with ridiculous weapons, and then
+somehow put every last piece back together before the parents walk in. The winners
+of the war only get to watch their show if the house passes inspection. Trash the
+place too hard and *everyone* is grounded.
 
 ## Design pillars
 
 1. **Cozy chaos.** Soft pixel art, warm colours, nobody gets hurt. Violence is
-   slapstick: bonks, boops and KOs that end in a nap, never a death.
+   slapstick: toaster cannons, egg bombs and KOs that end in a nap, never a death.
 2. **Rapid, readable action.** Matches are short, inputs are few (move, attack,
    special, dash, interact) and every character reads at a glance.
 3. **Rivals, then roommates.** The same players who just fought have to cooperate.
@@ -33,9 +35,9 @@ Trash the place too hard and *everyone* is grounded.
 | Phase | Default length | What happens |
 |---|---|---|
 | Countdown | 3 s | "The parents just left..." Everyone at their base. |
-| **War** | 3:00, or first to **5** captures | Capture the remote. KOs, knockbacks, mess. |
+| **War** | 3:00, or first to **5** captures | Capture the remote. KOs, explosions, wrecked furniture. |
 | Whistle | 3 s | "CAR IN THE DRIVEWAY!" Everyone freezes; KO'd players wake up. |
-| **Cleanup** | 0:45 | Both teams fix, sweep and return the remote. |
+| **Cleanup** | 0:45 | Both teams rebuild, fix, sweep and return the remote. |
 | Results | until the host continues | The parents' verdict, the TV, the awards. |
 
 All of these are `@export` knobs on `Match` (`game/scenes/match/match.gd`).
@@ -56,35 +58,81 @@ All of these are `@export` knobs on `Match` (`game/scenes/match/match.gd`).
 
 ### Combat
 
+**What it's built on.** It's a top-down arena brawler, not a copy of any one game.
+It borrows the core loop of twin-stick action games like Hades (one weapon, one
+special on a cooldown, a dash), Smash Bros' idea that *knockback*, not damage, is
+the real threat, and hero-shooter class design like Overwatch: each side has the
+same four jobs, filled by very different characters.
+
 | Input | What it does |
 |---|---|
-| **Attack** | Short-range swipe in a cone in front of you. ~5-7 hits to KO. |
-| **Special** | Your character's signature move, on a cooldown (3.5 to 8 s). |
-| **Dash** | A quick burst of speed on a 1.1 s cooldown. Dashing through things knocks them over. |
+| **Attack** | Fire (or swing) your character's weapon. Holding it keeps automatic weapons going. |
+| **Special** | Your signature move, on a cooldown (3.5 to 9 s). |
+| **Dash** | A quick burst on a 1.1 s cooldown. Some characters' dashes are shorter. |
 
-- **Knockback** is big and floaty. Getting launched into the furniture is half the fun.
+- **Weapons are ridiculous on purpose:** a laser pointer blaster, a catnip bazooka, a
+  tennis ball gatling gun, egg bombs, a dust cannon, a toaster that fires flaming
+  toast, a wrecking ball, a subwoofer cannon. They come in three kinds: *melee*
+  (swing in a cone), *shots* (straight projectiles), and *lobbed shells* that sail
+  over furniture and explode where they land.
+- **Knockback** is big and floaty. Getting launched into the furniture is half the
+  fun, and it damages whatever you crash into.
 - **KO** at 0 HP: the character curls up for a nap (`z z`) for 4 seconds, then
   respawns at their base with a moment of invulnerability. They leave behind
   **debris**: fur tufts for pets, loose bolts for robots.
-- Hits are resolved by the host (see *Networking*), so there's no death, no
-  permanent loss, and no griefing your own team: friendly fire is off.
+- Hits are resolved by the host (see *Networking*): no death, no permanent loss,
+  and friendly fire is off.
 
-### Mess: how the house gets wrecked
+### Stealth and detection
 
-Everything under the `Entities` node in the level that is a `MessItem` can be
-knocked over (lamps, plants, vases, cushions, books, bookshelves, the laundry basket).
+The pets are sneaky, the robots have sensors.
+
+- **Sneaky (both cats):** stand still for a second and you turn invisible to the
+  other team. Moving, attacking or getting hit gives you away. Willow's **Vanish**
+  keeps her invisible on the move for 4 seconds.
+- **Low Profile (Zoomba):** drives *under* furniture and stays hidden while it's there.
+- **Ambush:** the first hit out of stealth does **double damage** and dazes. The host
+  checks that the attacker really was hidden a moment ago.
+- **Seeing hidden enemies:** Pepper's **nose** (short range) and Unit-7's **x-ray
+  vision** (long range) reveal hidden enemies near them to their whole team. Revealed
+  characters show a red ring and a little eye.
+- **What you see depends on your team:** hidden enemies are invisible, hidden
+  teammates look ghostly, revealed enemies are drawn normally. Bots play by the same
+  rule: they can't target what their team can't see.
+
+### Wrecking the house
+
+This is the joke of the game: they basically destroy the house, then have to
+fix it. Two layers of destruction pile up during the war.
+
+**Furniture has health.** Couches, armchairs, tables, beds, counters, fridges, desks,
+bean bags and even the half-walls crack as they take damage, then collapse into a
+heap of rubble. Rubble isn't solid, so the arena opens up as the war goes on (and
+the bots re-plan their routes). Damage comes from:
+
+- every weapon (each has a `demolition` value: the wrecking ball and bazooka are
+  the worst),
+- straight shots, which stop at the first piece of furniture in the way and chip at
+  it (so furniture is *cover* that slowly gets destroyed), except Bass's bass waves,
+  which go straight through,
+- explosions, which hit everything in the blast,
+- characters knocked flying into it.
+
+The TV, the pets' cat tree, the robots' charging dock and the wood stove are
+indestructible: something has to be left to fight over.
+
+**Things get knocked over and the floor gets filthy.** Everything that is a
+`MessItem` (lamps, plants, vases, cushions, books, pies, trash cans, bookshelves,
+laundry) can be knocked over:
 
 | Source | Light items | Heavy items (bookshelf, basket) |
 |---|---|---|
-| Basic attacks swinging near it | knocked | only if the attack is strong (>= 200 force) |
-| Specials (landings, slams, projectiles) | knocked | usually knocked |
+| Weapon hits and explosions nearby | knocked | if the hit is strong (>= 200 force) |
 | A character sent tumbling into it | knocked | knocked |
 | A character dashing into it | knocked | no |
 | **Cats just walking into it** (Willow, Biscuit) | knocked | no |
-| Every KO | +1 debris pile | |
-
-Knocked items slide a little, fall on their side and sometimes spill (plants
-drop dirt). They stay down until phase 2.
+| Every KO | +1 fur tuft or pile of bolts | |
+| Every explosion | +1 scorch mark (or egg splat) | |
 
 ## Phase 2: Cover it up
 
@@ -93,13 +141,17 @@ When the war ends, everyone is friends. No attacking. The goal is to get the
 
 | Task | How | Weight |
 |---|---|---|
+| **Rebuild wrecked furniture** | Two helpers hold *interact* at the rubble (Unit-7 or The Claw can do it alone) | 2 + its size |
 | Stand something back up | Hold *interact* next to it (3 s, faster with helpers) | 1 |
-| Heavy things (marked **x2**) | Need **two** helpers at once, or The Claw alone | 3 |
-| Sweep debris | Hold *interact* next to it (0.8 s). Zoomba just drives over it | 0.5 |
+| Heavy things (marked **x2**) | Two helpers at once, or Unit-7 / The Claw alone | 3 |
+| Sweep fur and bolts | Hold *interact* next to it (0.8 s). Zoomba just drives over it | 0.5 |
+| Scrub scorch marks and egg | Hold *interact* next to it (1-1.2 s) | 0.5 |
 | Return the remote | Carry it back onto the middle rug | 1 |
 
 **Tidiness** = how much of the mess at the start of cleanup you undid.
-Each character has a `tidy` speed (cats 0.6-0.75x, Unit-7 1.5x).
+The robots are the rebuild specialists: Unit-7 tidies at 2x and counts as two
+helpers, The Claw counts as two, Zoomba vacuums, and everyone near Bass works 30%
+faster. The cats (0.6-0.75x) mostly get in the way.
 
 ### The parents' verdict
 
@@ -117,30 +169,32 @@ End-of-match awards: **Remote runner** (most captures), **Most bonks** (most KOs
 
 ## The roster
 
-Each side has the same four archetypes so the teams stay balanced, but every
-character plays differently. Numbers live in `game/scripts/core/roster.gd`.
+Each side has four very different characters: the pets lean on stealth, speed
+and chaos, the robots on sensors, toughness and repairs. Every character has one
+clear strength and one clear weakness. Numbers live in `game/scripts/core/roster.gd`.
 
 ### Team Pets
 
-| | Role | HP | Speed | Attack | Special | Cleanup |
+| | Role | HP | Weapon | Special | Strength | Weakness |
 |---|---|---|---|---|---|---|
-| **Willow**, tabby cat | Speedster | 80 | 150 | Swipe | **Pounce**: leap forward, AoE bonk on landing | 0.75x, clumsy (knocks things over by walking past) |
-| **Biscuit**, chonky cat | Tank | 150 | 115 | Paw Smack | **Belly Flop**: jump up, crash down, huge knockback | 0.6x, clumsy ("mostly supervises") |
-| **Pepper**, pup | Bruiser | 110 | 135 | Chomp | **Big Bark**: sound wave that pierces and stuns | 1.25x |
-| **Kiwi**, budgie | Flyer | 65 | 145 | Peck | **Feather Flurry**: three-feather spread | 1.0x, flies over furniture |
+| **Willow**, tabby cat | Assassin | 65 | **Laser Pointer Blaster**: fast, long-range bolts | **Vanish**: invisible on the move for 4 s | **Sneaky**: invisible when still; ambushes do double damage | **Fragile**: lowest health in the house |
+| **Biscuit**, chonky cat | Demolisher | 150 | **Catnip Bazooka**: lobbed rockets, big blast, wrecks furniture | **Belly Flop**: jump up, crash down, huge knockback | **Heavy**: takes half knockback (and sneaky, like all cats) | **Slow**: slowest in the house, slow reload |
+| **Pepper**, pup | Tracker | 110 | **Tennis Ball Gatling**: hold to spray | **Big Bark**: a wave that pierces and stuns | **Good Nose**: reveals hidden enemies nearby for the team | **Butterfingers**: drops the remote whenever he's hit |
+| **Kiwi**, budgie | Bomber | 60 | **Egg Bombs**: dropped from above, splash and splat | **Feather Flurry**: three-feather spread | **Flight**: flies over furniture, can't be slammed or sucked in | **Featherweight**: tiny health, knocked 60% further |
 
 ### Team Robots
 
-| | Role | HP | Speed | Attack | Special | Cleanup |
+| | Role | HP | Weapon | Special | Strength | Weakness |
 |---|---|---|---|---|---|---|
-| **Zoomba**, robot vacuum | Speedster | 90 | 155 | Bump | **Turbo Suck**: pulls enemies *and a loose remote* toward you | 1.0x, vacuums debris by driving over it |
-| **Unit-7**, helper bot | Tank | 140 | 115 | Bonk | **Rocket Fist**: long-range punch | 1.5x |
-| **The Claw**, ceiling gantry | Flyer | 70 | 140 | Pinch | **Claw Drop**: telegraphed slam from above, long stun | 1.0x, lifts heavy things alone |
-| **Bass**, smart speaker | Support | 100 | 125 | Sound Pulse | **Hype Track**: heals nearby allies and speeds them up | 1.0x |
+| **Zoomba**, robot vacuum | Ambusher | 90 | **Dust Cannon**: close-range shotgun | **Turbo Suck**: pulls enemies *and a loose remote* in | **Low Profile**: hides under furniture; ambushes do double damage | **Flips Over**: a big hit leaves it upside down and helpless |
+| **Unit-7**, helper bot | Engineer | 140 | **Toaster Cannon**: lobbed flaming toast | **Rocket Fist**: long-range punch | **X-Ray Vision** (long-range reveal) and **Handy** (2x rebuild speed, fixes big things alone) | **Clunky**: slow, stiff short dash |
+| **The Claw**, ceiling gantry | Wrecker | 75 | **Wrecking Ball**: huge swing, flattens furniture | **Claw Drop**: telegraphed slam, long stun | **Ceiling Rider + Strong**: glides over furniture, lifts heavy things alone | **Long Reboot**: +3 s before respawning |
+| **Bass**, smart speaker | Support | 100 | **Subwoofer Cannon**: bass waves that pass through enemies *and* furniture | **Hype Track**: heals and speeds up nearby allies | **Cleaning Playlist**: allies nearby tidy 30% faster | **No Legs**: hops, so its dash is tiny |
 
 Ideas waiting in the wings: a hamster in a ball, a goldfish in a rolling bowl,
 a smart fridge (immobile turret?), a drone, a robot lawnmower that only works
-in the garden map.
+in the garden map. Household **weapon pickups** (a leaf blower, a garden hose, a
+fire extinguisher) that spawn mid-war would add even more chaos.
 
 ## The homes (maps)
 

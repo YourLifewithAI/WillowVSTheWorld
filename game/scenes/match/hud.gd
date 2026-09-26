@@ -198,7 +198,7 @@ func on_phase_changed() -> void:
 			_hint.text = ""
 		Match.Phase.CLEANUP:
 			_phase.text = "CLEAN UP BEFORE THEY'RE IN"
-			_hint.text = "Hold E next to anything knocked over   ·   \"x2\" needs two helpers   ·   Put the remote back on the rug"
+			_hint.text = "Hold E by anything broken or knocked over   ·   \"x2\" needs two helpers (or Unit-7 / The Claw)   ·   Return the remote"
 
 
 func _process(_delta: float) -> void:
@@ -223,10 +223,16 @@ func _process(_delta: float) -> void:
 		_special_bar.value = 1.0 - me.special_cd / float(sp["cooldown"])
 		_dash_bar.value = 1.0 - me.dash_cd / Player.DASH_COOLDOWN
 		var ready := "ready!" if me.special_cd <= 0.0 else "%.1fs" % me.special_cd
-		if me.is_ko:
+		if arena.phase == Match.Phase.CLEANUP:
+			_special_label.text = "Hold E to fix things (%s)" % me.data["tidy_note"].trim_suffix(".").to_lower()
+		elif me.is_ko:
 			_special_label.text = "KO'd! Back in a moment..."
 		elif me.carrying:
 			_special_label.text = "Carrying the remote! E: pass it  (no dashing)"
+		elif me.hiding:
+			_special_label.text = "Hidden under the furniture. Pounce!"
+		elif me.stealthed:
+			_special_label.text = "Invisible! Your next hit does double damage."
 		else:
 			_special_label.text = "K: %s  %s" % [sp["name"], ready]
 

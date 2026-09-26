@@ -249,6 +249,127 @@ SPRITES: dict[str, dict] = {
             "cc..",
         ],
     },
+    # ------------------------------------------------------------ WEAPONS
+    # Held weapons are drawn next to their owner, pointing right.
+    "w_laser": {  # Willow's laser pointer blaster
+        "palette": {"p": "#ff8fab", "d": "#c75a7a", "w": "#ffffff", "r": "#ff3b3b"},
+        "rows": [
+            "....ww......",
+            "pppppppppwrr",
+            "pdddppppppr.",
+            "..dd........",
+        ],
+    },
+    "w_bazooka": {  # Biscuit's catnip bazooka
+        "palette": {"g": "#5cbf6a", "l": "#a8e6a0", "o": "#2f7a44", "d": "#8a5a3c"},
+        "rows": [
+            "gggggggggggggoo",
+            "gllgllgggggggoo",
+            "ggggggggggggg..",
+            "...dd..........",
+        ],
+    },
+    "w_gatling": {  # Pepper's tennis ball gatling
+        "palette": {"y": "#e8f25c", "g": "#c9d64a", "s": "#9aa3b0", "b": "#5a6272", "d": "#8a5a3c"},
+        "rows": [
+            "..yy........",
+            ".yggy.......",
+            ".yyyy.......",
+            "ssssssssssbb",
+            "ssssssssssbb",
+            "..dd........",
+        ],
+    },
+    "w_dustcannon": {  # Zoomba's dust cannon turret
+        "palette": {"m": "#b3bccb", "c": "#5a6272"},
+        "rows": [
+            "..mmm....",
+            ".mmmmcccc",
+            ".mmmmcccc",
+            "mmmmmm...",
+        ],
+    },
+    "w_toaster": {  # Unit-7's toaster cannon
+        "palette": {"t": "#e8b86d", "s": "#c9d0da", "w": "#ffffff", "b": "#5a6272", "d": "#3b3b44"},
+        "rows": [
+            "..tt.tt....",
+            ".ssssssss..",
+            "sssssssssbb",
+            "swwssssssbb",
+            "sssssssss..",
+            ".d.....d...",
+        ],
+    },
+    "w_wreckingball": {  # The Claw's wrecking ball
+        "palette": {"c": "#8a93a3", "k": "#3b4150", "h": "#8a93a3"},
+        "rows": [
+            "....c....",
+            "....c....",
+            "....c....",
+            "..kkkkk..",
+            ".kkkkkkk.",
+            "kkkhkkkkk",
+            "kkhkkkkkk",
+            "kkkkkkkkk",
+            ".kkkkkkk.",
+            "..kkkkk..",
+        ],
+    },
+    "p_rocket": {  # catnip rocket
+        "palette": {"g": "#5cbf6a", "l": "#a8e6a0", "f": "#ff9a3c"},
+        "rows": [
+            "..ggggg.",
+            "ffggllgg",
+            "..ggggg.",
+        ],
+    },
+    "p_ball": {
+        "palette": {"y": "#e8f25c"},
+        "rows": [
+            ".y.",
+            "yyy",
+            ".y.",
+        ],
+    },
+    "p_egg": {
+        "palette": {"w": "#fffdf0"},
+        "rows": [
+            ".ww.",
+            "wwww",
+            "wwww",
+            ".ww.",
+        ],
+    },
+    "p_toast": {
+        "palette": {"t": "#c0873f", "b": "#e8c07a"},
+        "rows": [
+            ".tttt.",
+            "tbbbbt",
+            "tbbbbt",
+            "tttttt",
+        ],
+    },
+    "scorch": {  # scorch mark left by explosions
+        "palette": {"k": "#2b2226"},
+        "outline": "#5a4a4a",
+        "rows": [
+            "..kkkk....",
+            ".kkkkkkkk.",
+            "kkkkkkkkk.",
+            "..kkkkk...",
+        ],
+    },
+    "yolk": {  # egg splat
+        "palette": {"w": "#fffdf0", "y": "#ffc93c"},
+        "outline": "#e8d9b8",
+        "rows": [
+            "..wwww....",
+            ".wwwwwwww.",
+            "wwwyyyww..",
+            ".wwyyyww..",
+            "..wwww....",
+        ],
+    },
     # ---------------------------------------------------------- MESS ITEMS
     "lamp": {  # floor lamp
         "palette": {"s": "#ffe9b0", "h": "#f5c96a", "p": "#5b4a42", "b": "#3d312c"},
