@@ -1,6 +1,6 @@
 # Willow VS The World: Game Design Document
 
-*Living document. Version 0.3: four homes, over-the-top weapons, stealth, and furniture you can destroy.*
+*Living document. Version 0.4: four homes, over-the-top weapons, gags, stealth, and furniture you can destroy.*
 
 ## The pitch
 
@@ -68,6 +68,7 @@ same four jobs, filled by very different characters.
 |---|---|
 | **Attack** | Fire (or swing) your character's weapon. Holding it keeps automatic weapons going. |
 | **Special** | Your signature move, on a cooldown (3.5 to 9 s). |
+| **Gag** | Your big, silly, charge-up move (see *Gags* below). |
 | **Dash** | A quick burst on a 1.1 s cooldown. Some characters' dashes are shorter. |
 
 - **Weapons are ridiculous on purpose:** a laser pointer blaster, a catnip bazooka, a
@@ -82,6 +83,26 @@ same four jobs, filled by very different characters.
   **debris**: fur tufts for pets, loose bolts for robots.
 - Hits are resolved by the host (see *Networking*): no death, no permanent loss,
   and friendly fire is off.
+
+### Gags
+
+Every character has a **gag**: a big, silly move themed on what they are (cats get
+litter, the dog gets a bone, the Roomba sucks) that also plays to their strengths. The
+gag meter fills slowly during the war and faster as you deal damage (about 55 seconds
+from empty, or ~330 damage). Press **I** (or **Q**, or the right bumper).
+
+| Who | Gag | The joke | Why it's a bonus for them |
+|---|---|---|---|
+| Cats (Willow, Biscuit) | **Litter Bomb** | Lob a whole litter box; it bursts into a dust cloud and litters the floor | Cats inside their own cloud stay invisible *even while running*; enemies wade through it at 60% speed. Biscuit's box is chonkier (bigger cloud). |
+| Pepper | **Big Bone** | The gatling is swapped for a giant bone for 8 s; every whack is a home run | Huge knockback, wrecks furniture, and a dog never lets go of a bone: no butterfingers while holding it |
+| Kiwi | **Flock Call** | A stampede of budgies sweeps a wide lane across the room | Bowls over everyone in the lane; Kiwi rides the flock at +60% speed |
+| Zoomba | **Mega Suck** | A 3 s vortex drags enemies in; anyone who reaches Zoomba is *swallowed* for 2 s, then spat across the room | If the remote carrier gets swallowed, Zoomba gets the remote |
+| Unit-7 | **Satellite Laser** | A targeting reticle, then an orbital beam from space | Massive damage and demolition, *and* a 6 s scan that reveals every hidden pet to the whole robot team |
+| The Claw | **Claw Machine** | Like the arcade: grabs whoever's underneath and carries them around the ceiling for 3 s, then drops them | Grab the remote carrier and the remote is the Claw's |
+| Bass | **Dance Party** | A disco ball drops; every enemy nearby is forced to dance for 2.8 s | Dancing enemies are sitting ducks; allies on the dance floor heal |
+
+Swallowed and grabbed characters can't be hit (they're safe inside a dust bin, or a
+claw), and flyers are too quick for Mega Suck.
 
 ### Stealth and detection
 
@@ -133,6 +154,7 @@ laundry) can be knocked over:
 | **Cats just walking into it** (Willow, Biscuit) | knocked | no |
 | Every KO | +1 fur tuft or pile of bolts | |
 | Every explosion | +1 scorch mark (or egg splat) | |
+| Every Litter Bomb | +3 piles of cat litter | |
 
 ## Phase 2: Cover it up
 
@@ -145,7 +167,7 @@ When the war ends, everyone is friends. No attacking. The goal is to get the
 | Stand something back up | Hold *interact* next to it (3 s, faster with helpers) | 1 |
 | Heavy things (marked **x2**) | Two helpers at once, or Unit-7 / The Claw alone | 3 |
 | Sweep fur and bolts | Hold *interact* next to it (0.8 s). Zoomba just drives over it | 0.5 |
-| Scrub scorch marks and egg | Hold *interact* next to it (1-1.2 s) | 0.5 |
+| Scrub scorch marks and egg, sweep litter | Hold *interact* next to it (0.9-1.2 s) | 0.5 |
 | Return the remote | Carry it back onto the middle rug | 1 |
 
 **Tidiness** = how much of the mess at the start of cleanup you undid.
@@ -190,6 +212,8 @@ clear strength and one clear weakness. Numbers live in `game/scripts/core/roster
 | **Unit-7**, helper bot | Engineer | 140 | **Toaster Cannon**: lobbed flaming toast | **Rocket Fist**: long-range punch | **X-Ray Vision** (long-range reveal) and **Handy** (2x rebuild speed, fixes big things alone) | **Clunky**: slow, stiff short dash |
 | **The Claw**, ceiling gantry | Wrecker | 75 | **Wrecking Ball**: huge swing, flattens furniture | **Claw Drop**: telegraphed slam, long stun | **Ceiling Rider + Strong**: glides over furniture, lifts heavy things alone | **Long Reboot**: +3 s before respawning |
 | **Bass**, smart speaker | Support | 100 | **Subwoofer Cannon**: bass waves that pass through enemies *and* furniture | **Hype Track**: heals and speeds up nearby allies | **Cleaning Playlist**: allies nearby tidy 30% faster | **No Legs**: hops, so its dash is tiny |
+
+Each character's **gag** is listed in *Gags* above.
 
 Ideas waiting in the wings: a hamster in a ball, a goldfish in a rolling bowl,
 a smart fridge (immobile turret?), a drone, a robot lawnmower that only works
@@ -245,6 +269,7 @@ smart-home-of-the-future where the robots have home advantage.
 | Move | WASD / arrow keys | Left stick / d-pad |
 | Attack | J or Z | X (west button) |
 | Special | K or X | Y (north button) |
+| Gag | I or Q | Right bumper |
 | Dash | Space, L or Shift | A (south button) |
 | Interact: throw remote, hold to tidy | E or C | B (east button) |
 | Menu | Esc | |

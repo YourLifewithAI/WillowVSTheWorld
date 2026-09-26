@@ -13,7 +13,9 @@ extends CharacterBody2D
 ## draw a hidden character: invisible to enemies, ghostly to teammates, and
 ## visible to enemies who have a nose or x-ray vision nearby (Match.is_revealed).
 
-enum Action { ATTACK, SPECIAL, DASH }
+enum Action { ATTACK, SPECIAL, DASH, GAG }
+## How a character can be held by an enemy's gag.
+enum Capture { NONE, SWALLOWED, GRABBED }
 
 const SEND_RATE := 30.0
 const DASH_SPEED := 430.0
@@ -27,6 +29,12 @@ const BODY_RADIUS := 7.0
 const SNEAK_DELAY := 1.0
 ## Damage done to furniture by a character slamming into it.
 const CRASH_DAMAGE := 18.0
+## Seconds of war to fill the gag meter from empty (landing hits speeds it up).
+const GAG_CHARGE_TIME := 55.0
+## Gag meter gained per point of damage dealt (about 330 damage fills it).
+const GAG_PER_DAMAGE := 0.003
+## Speed while wading through an enemy litter cloud.
+const CLOUD_SLOW := 0.6
 
 var pid := 0
 var char_id := "willow"
@@ -44,6 +52,13 @@ var max_hp := 100
 var is_ko := false
 var invuln := 0.0
 var carrying := false
+## Held by another player's gag (swallowed by Zoomba, grabbed by the Claw).
+var captured_by := 0
+var capture_mode: Capture = Capture.NONE
+## Forced to dance by Bass.
+var dance_t := 0.0
+## Seconds left on this character's own gag (Big Bone, Flock Call, Mega Suck...).
+var gag_t := 0.0
 ## Host only: when this character was last seen hidden (validates ambushes).
 var last_stealth_time := -100.0
 
@@ -66,6 +81,8 @@ var special_cd := 0.0
 var dash_cd := 0.0
 var buff_mult := 1.0
 var vanish_t := 0.0
+## 0..1; the gag is ready at 1.
+var gag_charge := 0.3
 var _buff_t := 0.0
 var _dash_t := 0.0
 var _slam_t := 0.0
@@ -96,6 +113,7 @@ var _telegraph := 0.0
 var _stun_vis := 0.0
 var _flip_t := 0.0
 var _revealed := false
+var _showing_bone := false
 
 
 func setup(p_id: int, info: Dictionary, p_arena: Match) -> void:
@@ -185,6 +203,7 @@ func _gather_input() -> Dictionary:
 		"attack_held": Input.is_action_pressed("attack"),
 		"special": Input.is_action_just_pressed("special"),
 		"dash": Input.is_action_just_pressed("dash"),
+		"gag": Input.is_action_just_pressed("gag"),
 		"interact": Input.is_action_pressed("interact"),
 		"interact_pressed": Input.is_action_just_pressed("interact"),
 	}
@@ -201,6 +220,12 @@ func _owner_tick(delta: float) -> void:
 	if _buff_t <= 0.0:
 		buff_mult = 1.0
 
+	if captured_by != 0:
+		_follow_captor()
+		return
+	if arena.phase == Match.Phase.WAR and not is_ko:
+		gag_charge = minf(1.0, gag_charge + delta / GAG_CHARGE_TIME)
+
 	var inp := _gather_input()
 	var free_to_act := arena.can_move() and not is_ko and stun <= 0.0
 	var move: Vector2 = inp["move"] if free_to_act and _slam_t <= 0.0 else Vector2.ZERO
@@ -212,6 +237,9 @@ func _owner_tick(delta: float) -> void:
 	var speed: float = data["speed"] * buff_mult
 	if carrying:
 		speed *= data["carry_speed"]
+	var cloud := arena.cloud_at(position)
+	if cloud and cloud.team != team and not data.get("flying", false):
+		speed *= CLOUD_SLOW
 	var v := move * speed
 
 	if _dash_t > 0.0:
@@ -257,6 +285,8 @@ func _owner_tick(delta: float) -> void:
 		_do_attack()
 	elif inp["special"] and special_cd <= 0.0:
 		_do_special()
+	elif inp.get("gag", false) and gag_charge >= 1.0:
+		_do_gag()
 
 
 func _flags() -> int:
@@ -303,7 +333,10 @@ func _update_stealth(delta: float) -> void:
 	var can_hide := not carrying and not is_ko and _reveal_t <= 0.0 and arena.phase == Match.Phase.WAR
 	hiding = can_hide and data.get("low_profile", false) and arena.level.furniture_at(position) != null
 	var sneaking: bool = data.get("sneaky", false) and _still_t >= SNEAK_DELAY
-	stealthed = can_hide and (sneaking or vanish_t > 0.0 or hiding)
+	# Cats vanish inside their own team's litter cloud, even on the move.
+	var cloud := arena.cloud_at(position)
+	var in_litter: bool = data.get("sneaky", false) and cloud != null and cloud.team == team
+	stealthed = can_hide and (sneaking or vanish_t > 0.0 or hiding or in_litter)
 
 
 ## Attacking or getting hit gives your position away for a moment.
@@ -317,16 +350,97 @@ func _break_stealth(for_seconds: float) -> void:
 
 # =================================================================== combat
 
+## Pepper's Big Bone replaces his weapon while it lasts.
+func has_bone() -> bool:
+	return gag_t > 0.0 and int(data["gag"]["kind"]) == Roster.Gag.BONE
+
+
+func weapon_spec() -> Dictionary:
+	return data["gag"] if has_bone() else data["weapon"]
+
+
+func _weapon_is_melee() -> bool:
+	return has_bone() or int(data["weapon"]["kind"]) == Roster.Weapon.MELEE
+
+
 func _do_attack() -> void:
-	var w: Dictionary = data["weapon"]
+	var w := weapon_spec()
 	attack_cd = w["cooldown"]
 	var ambush := stealthed
 	_break_stealth(0.6)
 	_play_action.rpc(Action.ATTACK, facing)
-	if int(w["kind"]) == Roster.Weapon.MELEE:
-		_hit_arc(w, ambush)
+	if _weapon_is_melee():
+		_hit_arc(w, 2 if has_bone() else 0, ambush)
 	else:
 		_fire(0, w, ambush)
+
+
+func _do_gag() -> void:
+	var g: Dictionary = data["gag"]
+	gag_charge = 0.0
+	_break_stealth(0.3)
+	_play_action.rpc(Action.GAG, facing)
+	match int(g["kind"]):
+		Roster.Gag.LITTER:
+			_proj_counter += 1
+			_spawn_projectile.rpc(2, facing, _proj_counter, false)
+		Roster.Gag.BONE:
+			arena.log_event("gag %s by %d" % [g["name"], pid])
+		Roster.Gag.FLOCK:
+			arena.log_event("gag %s by %d" % [g["name"], pid])
+			_flock_hits(g)
+			buff_mult = g["speed_mult"]
+			_buff_t = g["duration"]
+		Roster.Gag.SATELLITE:
+			arena.report_gag(self, _satellite_target(g))
+		Roster.Gag.MEGA_SUCK, Roster.Gag.CLAW_MACHINE, Roster.Gag.DANCE:
+			arena.report_gag(self, position)
+
+
+## Flock Call: everyone in a wide lane ahead gets bowled over at once.
+func _flock_hits(g: Dictionary) -> void:
+	var side := Vector2(-facing.y, facing.x)
+	for other: Player in arena.players.values():
+		if other.team == team or other.is_ko:
+			continue
+		var off := Iso.to_floor(other.position - position)
+		var along := off.dot(facing)
+		if along > 0.0 and along <= float(g["length"]) and absf(off.dot(side)) <= float(g["width"]):
+			arena.report_hit(self, other, 2, facing)
+	for item in arena.level.mess_items:
+		var off := Iso.to_floor(item.position - position)
+		if off.dot(facing) > 0.0 and off.dot(facing) <= float(g["length"]) and absf(off.dot(side)) <= float(g["width"]):
+			arena.report_mess_hit(item, g["knock"], facing)
+
+
+## Satellite Laser: lock onto the nearest enemy we can see, or fire straight ahead.
+func _satellite_target(g: Dictionary) -> Vector2:
+	var best := position + Iso.to_screen(facing * 90.0)
+	var best_d := float(g["reach"])
+	for other: Player in arena.players.values():
+		if other.team == team or other.is_ko or not arena.is_revealed(other, team):
+			continue
+		var d := Iso.fdist(other.position, position)
+		if d < best_d:
+			best = other.position
+			best_d = d
+	return arena.level.clamp_to_floor(best)
+
+
+## While swallowed or grabbed, we just go wherever our captor goes.
+func _follow_captor() -> void:
+	var captor: Player = arena.players.get(captured_by)
+	if captor:
+		position = captor.position + Vector2(0, 0.5)
+		z = captor.z - 14.0 if capture_mode == Capture.GRABBED else 0.0
+	velocity = Vector2.ZERO
+	knock_vel = Vector2.ZERO
+	moving = false
+	dashing = false
+	tumbling = false
+	interacting = false
+	stealthed = false
+	hiding = false
 
 
 func _do_special() -> void:
@@ -372,7 +486,7 @@ func _land_slam() -> void:
 
 
 ## Reports every enemy, breakable and piece of furniture in a cone in front of us.
-func _hit_arc(w: Dictionary, ambush: bool) -> void:
+func _hit_arc(w: Dictionary, ability: int, ambush: bool) -> void:
 	var reach: float = w["range"]
 	var half_arc: float = float(w["arc"]) * 0.5
 	for other: Player in arena.players.values():
@@ -384,7 +498,7 @@ func _hit_arc(w: Dictionary, ambush: bool) -> void:
 			continue
 		if d > 4.0 and absf(rad_to_deg(facing.angle_to(off))) > half_arc:
 			continue
-		arena.report_hit(self, other, 0, off.normalized() if d > 0.1 else facing, ambush)
+		arena.report_hit(self, other, ability, off.normalized() if d > 0.1 else facing, ambush)
 	for item in arena.level.mess_items:
 		var off := Iso.to_floor(item.position - position)
 		if off.length() <= reach + 6.0 and (off.length() < 4.0 or absf(rad_to_deg(facing.angle_to(off))) <= half_arc):
@@ -435,8 +549,8 @@ func _play_action(action: int, dir: Vector2) -> void:
 	var fx_parent := arena.level.entities
 	match action:
 		Action.ATTACK:
-			var w: Dictionary = data["weapon"]
-			if int(w["kind"]) == Roster.Weapon.MELEE:
+			var w := weapon_spec()
+			if _weapon_is_melee():
 				_swing = 1.0
 				_squash = 0.2
 				Fx.swing(fx_parent, position + Vector2(0, -z + 8), dir, float(w["range"]) * 0.8, Color(1, 1, 1, 0.8))
@@ -447,6 +561,20 @@ func _play_action(action: int, dir: Vector2) -> void:
 			_squash = 0.3
 			if not stealthed:
 				Fx.puff(fx_parent, position, Color(1, 1, 1, 0.8))
+		Action.GAG:
+			var g: Dictionary = data["gag"]
+			_squash = 0.4
+			match int(g["kind"]):
+				Roster.Gag.BONE, Roster.Gag.MEGA_SUCK:
+					gag_t = g["duration"]
+					if int(g["kind"]) == Roster.Gag.MEGA_SUCK:
+						Fx.vortex(fx_parent, position, g["radius"], g["duration"])
+				Roster.Gag.FLOCK:
+					gag_t = g["duration"]
+					Fx.flock(fx_parent, position, dir, g["length"], g["width"])
+				Roster.Gag.DANCE:
+					Fx.disco(fx_parent, position, g["radius"], g["duration"] + 0.4)
+			Fx.text(fx_parent, position + Vector2(0, -sprite_height() - z - 10), String(g["name"]).to_upper() + "!", Color("ffd84d"))
 		Action.SPECIAL:
 			var sp: Dictionary = data["special"]
 			match int(sp["kind"]):
@@ -512,6 +640,40 @@ func respawn(at: Vector2) -> void:
 	Fx.puff(arena.level.entities, at, Roster.TEAM_COLORS[team])
 
 
+func start_capture(by_pid: int, mode: int) -> void:
+	captured_by = by_pid
+	capture_mode = mode as Capture
+	if is_multiplayer_authority():
+		_dash_t = 0.0
+		_slam_t = 0.0
+		_break_stealth(0.5)
+	var what := "GULP!" if mode == Capture.SWALLOWED else "GOTCHA!"
+	Fx.text(arena.level.entities, position + Vector2(0, -20 - z), what, Color.WHITE)
+
+
+func end_capture(knock: Vector2) -> void:
+	captured_by = 0
+	capture_mode = Capture.NONE
+	if is_multiplayer_authority():
+		z = hover()
+		knock_vel = knock
+	Fx.puff(arena.level.entities, position, Color(0.85, 0.82, 0.78))
+
+
+func start_dance(duration: float) -> void:
+	dance_t = duration
+	if is_multiplayer_authority():
+		stun = maxf(stun, duration)
+		_dash_t = 0.0
+		_break_stealth(0.5)
+
+
+## Zoomba's Mega Suck tugging us in (only the owner moves the body).
+func apply_pull(pull: Vector2) -> void:
+	if is_multiplayer_authority() and captured_by == 0:
+		knock_vel = knock_vel * 0.5 + pull
+
+
 func apply_buff(mult: float, duration: float, heal_to: int) -> void:
 	hp = heal_to
 	Fx.text(arena.level.entities, position + Vector2(0, -sprite_height() - z - 4), "+HYPE", Color("62f2ff"))
@@ -526,6 +688,10 @@ func reset_for_phase() -> void:
 	hp = max_hp
 	stealthed = false
 	hiding = false
+	captured_by = 0
+	capture_mode = Capture.NONE
+	dance_t = 0.0
+	gag_t = 0.0
 	if is_multiplayer_authority():
 		knock_vel = Vector2.ZERO
 		stun = 0.0
@@ -546,6 +712,8 @@ func _process(delta: float) -> void:
 	_squash = move_toward(_squash, 0.0, delta * 2.5)
 	_recoil = move_toward(_recoil, 0.0, delta * 8.0)
 	_swing = move_toward(_swing, 0.0, delta * 4.0)
+	gag_t = maxf(0.0, gag_t - delta)
+	dance_t = maxf(0.0, dance_t - delta)
 	if absf(facing.x) > 0.2:
 		_face_left = facing.x < 0.0
 	_sprite.flip_h = _face_left
@@ -560,7 +728,13 @@ func _process(delta: float) -> void:
 		_sprite.modulate = Color(0.7, 0.7, 0.75)
 	else:
 		_sprite.rotation = 0.0
-		if flying:
+		if dance_t > 0.0:
+			# Bass made them do it.
+			bob = -absf(sin(_anim_t * 10.0)) * 3.0
+			_sprite.rotation = sin(_anim_t * 10.0) * 0.35
+			_face_left = sin(_anim_t * 5.0) < 0.0
+			_sprite.flip_h = _face_left
+		elif flying:
 			bob = sin(_anim_t * 6.0) * 1.5
 		elif moving:
 			bob = -absf(sin(_anim_t * 16.0)) * 2.0
@@ -580,7 +754,9 @@ func _process(delta: float) -> void:
 	# How visible are we to whoever is looking at this screen?
 	var target_alpha := 1.0
 	_revealed = false
-	if stealthed and not is_ko:
+	if capture_mode == Capture.SWALLOWED:
+		target_alpha = 0.0  # Inside the dust bin.
+	elif stealthed and not is_ko:
 		var viewer := arena.local_player()
 		var viewer_team := viewer.team if viewer else team
 		if viewer_team == team:
@@ -604,11 +780,27 @@ func _process(delta: float) -> void:
 func _update_weapon() -> void:
 	if _weapon == null:
 		return
-	_weapon.visible = not is_ko and _flip_t <= 0.0
-	var hold: Vector2 = data["weapon"]["hold"]
+	var w := weapon_spec()
+	if has_bone() != _showing_bone:
+		_showing_bone = has_bone()
+		var tex := Roster.texture(w["sprite"])
+		_weapon.texture = tex
+		_weapon.centered = not _weapon_is_melee()
+		if _showing_bone:
+			_weapon.offset = Vector2(-floor(tex.get_width() / 2.0), -tex.get_height() + 2)
+		elif _weapon_is_melee():
+			_weapon.offset = Vector2(-floor(tex.get_width() / 2.0), 0)
+		else:
+			_weapon.offset = Vector2.ZERO
+	_weapon.visible = not is_ko and _flip_t <= 0.0 and captured_by == 0
+	var hold: Vector2 = w["hold"]
 	var side := -1.0 if _face_left else 1.0
 	_weapon.flip_h = _face_left
-	if int(data["weapon"]["kind"]) == Roster.Weapon.MELEE:
+	if has_bone():
+		# A bat-swing: wound up over the shoulder, then all the way through.
+		_weapon.position = Vector2(4.0 * side, hold.y - 4.0)
+		_weapon.rotation = side * (-0.5 + sin(_swing * PI) * 2.2)
+	elif _weapon_is_melee():
 		# The wrecking ball dangles, and swings out when used.
 		_weapon.position = Vector2(hold.x * side, hold.y)
 		_weapon.rotation = -side * sin(_swing * PI) * 1.6 + sin(_anim_t * 3.0) * 0.08

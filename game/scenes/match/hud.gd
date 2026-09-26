@@ -18,6 +18,8 @@ var _hp_bar: ProgressBar
 var _special_bar: ProgressBar
 var _special_label: Label
 var _dash_bar: ProgressBar
+var _gag_bar: ProgressBar
+var _gag_label: Label
 var _card: Control
 var _feed: VBoxContainer
 var _banner: VBoxContainer
@@ -119,6 +121,10 @@ func _build_card() -> void:
 	_dash_bar = UiTheme.bar(Color("9fd8ff"), 21, 3)
 	bars.add_child(_special_bar)
 	bars.add_child(_dash_bar)
+	_gag_label = UiTheme.label("", 7, Color("e0b8ff"))
+	col.add_child(_gag_label)
+	_gag_bar = UiTheme.bar(Color("c78cff"), 80, 3)
+	col.add_child(_gag_bar)
 
 
 func _build_feed() -> void:
@@ -189,10 +195,10 @@ func on_phase_changed() -> void:
 			_hint.text = ""
 		Match.Phase.COUNTDOWN:
 			_phase.text = "GET READY"
-			_hint.text = "Move: WASD / Arrows   Attack: J   Special: K   Dash: Space   Throw remote: E"
+			_hint.text = "Move: WASD   Attack: J   Special: K   Gag: I   Dash: Space   Throw remote: E"
 		Match.Phase.WAR:
 			_phase.text = "WAR FOR THE REMOTE"
-			_hint.text = "Move: WASD / Arrows   Attack: J   Special: K   Dash: Space   Throw remote: E"
+			_hint.text = "Move: WASD   Attack: J   Special: K   Gag: I   Dash: Space   Throw remote: E"
 		Match.Phase.WHISTLE:
 			_phase.text = "TRUCE!"
 			_hint.text = ""
@@ -222,8 +228,22 @@ func _process(_delta: float) -> void:
 		var sp: Dictionary = me.data["special"]
 		_special_bar.value = 1.0 - me.special_cd / float(sp["cooldown"])
 		_dash_bar.value = 1.0 - me.dash_cd / Player.DASH_COOLDOWN
+		_gag_bar.value = me.gag_charge
+		var gag_name: String = me.data["gag"]["name"]
+		if me.gag_t > 0.0:
+			_gag_label.text = "%s!" % gag_name.to_upper()
+		elif me.gag_charge >= 1.0:
+			_gag_label.text = "I: %s READY!" % gag_name.to_upper()
+			_gag_label.modulate.a = 0.6 + 0.4 * sin(Time.get_ticks_msec() / 120.0)
+		else:
+			_gag_label.text = "I: %s  %d%%" % [gag_name, roundi(me.gag_charge * 100.0)]
+			_gag_label.modulate.a = 1.0
 		var ready := "ready!" if me.special_cd <= 0.0 else "%.1fs" % me.special_cd
-		if arena.phase == Match.Phase.CLEANUP:
+		if me.captured_by != 0:
+			_special_label.text = "Swallowed! It's dark in here..." if me.capture_mode == Player.Capture.SWALLOWED else "Grabbed by the Claw!"
+		elif me.dance_t > 0.0:
+			_special_label.text = "Can't stop dancing!"
+		elif arena.phase == Match.Phase.CLEANUP:
 			_special_label.text = "Hold E to fix things (%s)" % me.data["tidy_note"].trim_suffix(".").to_lower()
 		elif me.is_ko:
 			_special_label.text = "KO'd! Back in a moment..."

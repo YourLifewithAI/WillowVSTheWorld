@@ -28,7 +28,7 @@ func _init(player: Player, match_node: Match) -> void:
 
 func think() -> Dictionary:
 	var inp := {"move": Vector2.ZERO, "attack": false, "special": false, "dash": false,
-		"interact": false, "interact_pressed": false}
+		"gag": false, "interact": false, "interact_pressed": false}
 	if me.is_ko:
 		return inp
 	var delta := me.get_physics_process_delta_time()
@@ -88,6 +88,9 @@ func _war(inp: Dictionary, delta: float) -> void:
 	if not me.carrying and me.special_cd <= 0.0 and _special_makes_sense(foe, dist, to_foe):
 		inp["special"] = true
 		_hesitate = 0.3
+	elif not me.carrying and me.gag_charge >= 1.0 and _gag_makes_sense(foe, dist, to_foe):
+		inp["gag"] = true
+		_hesitate = 0.4
 	if dist > 140.0 and me.dash_cd <= 0.0 and randf() < 0.01:
 		inp["dash"] = true
 
@@ -144,6 +147,27 @@ func _special_makes_sense(foe: Player, dist: float, to_foe: Vector2) -> bool:
 			return dist < float(sp["radius"]) * 0.8 or (arena.remote.is_free() and Iso.fdist(arena.remote.position, me.position) < float(sp["radius"]))
 		Roster.Special.AURA:
 			return me.hp < me.max_hp * 0.7 or dist < 60.0
+	return false
+
+
+func _gag_makes_sense(foe: Player, dist: float, to_foe: Vector2) -> bool:
+	var g: Dictionary = me.data["gag"]
+	var aimed := absf(rad_to_deg(me.facing.angle_to(to_foe))) < 15.0
+	match int(g["kind"]):
+		Roster.Gag.LITTER:
+			return aimed and dist > 60.0 and dist < float(g["range"]) + 20.0
+		Roster.Gag.BONE:
+			return dist < 70.0
+		Roster.Gag.FLOCK:
+			return aimed and dist < float(g["length"]) * 0.8
+		Roster.Gag.MEGA_SUCK:
+			return dist < float(g["radius"]) * 0.6
+		Roster.Gag.SATELLITE:
+			return dist < float(g["reach"])
+		Roster.Gag.CLAW_MACHINE:
+			return dist < float(g["radius"]) * 0.6
+		Roster.Gag.DANCE:
+			return dist < float(g["radius"]) * 0.6
 	return false
 
 

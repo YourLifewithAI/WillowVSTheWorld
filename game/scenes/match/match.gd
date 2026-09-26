@@ -55,6 +55,8 @@ var debris: Dictionary = {}  # id -> Debris
 var mess_baseline := 0.0
 var stats: Dictionary = {}  # pid -> {"bonks", "caps", "fixes"}
 var results: Dictionary = {}
+var clouds: Array[LitterCloud] = []
+var _scan_until: Dictionary = {}  # team -> time
 
 # Host only.
 var _loaded: Dictionary = {}
@@ -66,6 +68,11 @@ var _progress_sync_t := 0.0
 var _load_timeout := 8.0
 var _nav_dirty := false
 var _nav_t := 0.0
+var _next_cloud_id := 1
+var _vortices: Dictionary = {}  # Zoomba pid -> seconds left
+var _vortex_pulse := 0.0
+var _captures: Dictionary = {}  # captured pid -> {"by", "mode", "t"}
+var _strikes: Array[Dictionary] = []  # pending satellite strikes
 
 
 func _ready() -> void:
@@ -227,6 +234,7 @@ func _physics_process(delta: float) -> void:
 			_tick_ko(delta)
 			_tick_knockovers()
 			_tick_debris(delta)
+			_tick_gags(delta)
 			_tick_navigation(delta)
 			if time_left <= 0.0 or scores.max() >= capture_limit:
 				_end_war()
@@ -254,6 +262,10 @@ func _physics_process(delta: float) -> void:
 
 
 func _end_war() -> void:
+	for tid: int in _captures.keys():
+		_release(tid)
+	_vortices.clear()
+	_strikes.clear()
 	var winner := _winning_team()
 	_set_phase(Phase.WHISTLE, whistle_time)
 	_ko_timers.clear()
@@ -374,7 +386,7 @@ func _tick_remote(delta: float) -> void:
 		var best: Player = null
 		var best_d := PICKUP_RADIUS
 		for p: Player in players.values():
-			if p.is_ko or (p.pid == r.thrower and r.grace > 0.0):
+			if p.is_ko or p.captured_by != 0 or (p.pid == r.thrower and r.grace > 0.0):
 				continue
 			var d := Iso.fdist(p.position, r.position)
 			if d < best_d:
@@ -461,6 +473,9 @@ func _srv_throw(pid: int, dir: Vector2) -> void:
 # ================================================================== combat
 
 func report_hit(attacker: Player, target: Player, ability: int, dir: Vector2, ambush: bool = false) -> void:
+	if ability != 2:
+		var dealt := float(Roster.ability(attacker.data, ability).get("damage", 0))
+		attacker.gag_charge = minf(1.0, attacker.gag_charge + dealt * Player.GAG_PER_DAMAGE)
 	if multiplayer.is_server():
 		_srv_hit(attacker.pid, target.pid, ability, dir, ambush)
 	else:
@@ -485,28 +500,38 @@ func _srv_hit(aid: int, tid: int, ability: int, dir: Vector2, ambush: bool) -> v
 	if ability == 1 and t.data.get("flying", false) and (kind == Roster.Special.SLAM or kind == Roster.Special.PULL):
 		return
 	var d := dir.normalized() if dir.length() > 0.01 else Vector2.RIGHT
-	var damage := float(spec.get("damage", 0))
-	var knock := float(spec.get("knock", 0.0))
-	var stun := float(spec.get("stun", 0.0))
+	var knock_scale := 1.0
 	if ability == 1 and kind == Roster.Special.PULL:
 		d = Iso.to_floor(a.position - t.position).normalized()
-		knock *= clampf(Iso.fdist(a.position, t.position) / float(spec["radius"]), 0.35, 1.0)
+		knock_scale = clampf(Iso.fdist(a.position, t.position) / float(spec["radius"]), 0.35, 1.0)
 	# Hits from hiding hurt twice as much (if the attacker really was hidden).
 	var ambushed := ambush and Time.get_ticks_msec() / 1000.0 - a.last_stealth_time < 0.6
 	if ambushed:
+		log_event("ambush %d on %d" % [aid, tid])
+	_apply_hit(a, t, spec, d, knock_scale, ambushed)
+
+
+## Lands a hit on the host: damage, knockback, stuns, traits and KOs.
+func _apply_hit(a: Player, t: Player, spec: Dictionary, d: Vector2, knock_scale: float = 1.0, ambushed: bool = false) -> void:
+	if t.captured_by != 0 or t.is_ko:
+		return  # Safe inside a dust bin (or a claw).
+	var damage := float(spec.get("damage", 0))
+	var knock := float(spec.get("knock", 0.0)) * knock_scale
+	var stun := float(spec.get("stun", 0.0))
+	if ambushed:
 		damage *= AMBUSH_MULT
 		stun = maxf(stun, 0.5)
-		log_event("ambush %d on %d" % [aid, tid])
 	knock *= float(t.data.get("knock_mult", 1.0))
 	if t.data.get("flips", false) and knock >= FLIP_KNOCK:
 		stun = maxf(stun, 1.5)
 	t.hp = maxi(0, t.hp - roundi(damage))
-	if remote.carrier_pid == tid and remote.state == TVRemote.State.CARRIED:
+	if remote.carrier_pid == t.pid and remote.state == TVRemote.State.CARRIED:
 		remote.hold = 0.0
-		if t.data.get("butterfingers", false) and t.hp > 0:
+		# A dog never lets go of a bone, though.
+		if t.data.get("butterfingers", false) and t.hp > 0 and not t.has_bone():
 			_drop_remote(t.position)
 			_cl_event.rpc("%s dropped the remote! (butterfingers)" % t.display_name, Roster.TEAM_COLORS[t.team])
-	_cl_damaged.rpc(tid, t.hp, d * knock, stun, ambushed)
+	_cl_damaged.rpc(t.pid, t.hp, d * knock, stun, ambushed)
 	if t.hp <= 0:
 		_ko(t, a)
 
@@ -534,6 +559,8 @@ func _cl_damaged(tid: int, new_hp: int, knock: Vector2, stun: float, ambushed: b
 func is_revealed(p: Player, viewer_team: int) -> bool:
 	if not p.stealthed or p.team == viewer_team:
 		return true
+	if _scan_until.get(viewer_team, 0.0) > _now():
+		return true  # Unit-7's satellite is scanning the house.
 	for q: Player in players.values():
 		if q.team != viewer_team or q.is_ko:
 			continue
@@ -707,6 +734,204 @@ func _tick_cleanup(delta: float) -> void:
 			_cl_mess_progress.rpc(item.index, item.progress, lift)
 
 
+# ==================================================================== gags
+
+static func _now() -> float:
+	return Time.get_ticks_msec() / 1000.0
+
+
+## The litter cloud at a point, if any (only matters during the war).
+func cloud_at(p: Vector2) -> LitterCloud:
+	if phase != Phase.WAR:
+		return null
+	for c in clouds:
+		if is_instance_valid(c) and c.contains(p):
+			return c
+	return null
+
+
+func report_gag(p: Player, point: Vector2) -> void:
+	if multiplayer.is_server():
+		_srv_gag(p.pid, point)
+	else:
+		_srv_gag.rpc_id(1, p.pid, point)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _srv_gag(pid: int, point: Vector2) -> void:
+	if not multiplayer.is_server() or phase != Phase.WAR:
+		return
+	var p: Player = players.get(pid)
+	if p == null or p.get_multiplayer_authority() != _sender() or p.is_ko:
+		return
+	var g: Dictionary = p.data["gag"]
+	log_event("gag %s by %d" % [g["name"], pid])
+	match int(g["kind"]):
+		Roster.Gag.LITTER:
+			var at := level.clamp_to_floor(point)
+			_cl_cloud.rpc(_next_cloud_id, at, float(g["cloud_radius"]), float(g["cloud_time"]), p.team)
+			_next_cloud_id += 1
+			for k in 3:
+				_spawn_debris("litter", at + Iso.to_screen(Vector2.from_angle(TAU * k / 3.0 + randf()) * 16.0))
+		Roster.Gag.MEGA_SUCK:
+			_vortices[pid] = float(g["duration"])
+		Roster.Gag.SATELLITE:
+			_strikes.append({"pid": pid, "pos": point, "t": float(g["delay"])})
+			_cl_satellite.rpc(point, float(g["delay"]), float(g["radius"]))
+			_cl_scan.rpc(p.team, float(g["scan"]))
+		Roster.Gag.CLAW_MACHINE:
+			var best: Player = null
+			var best_d := float(g["radius"])
+			for t: Player in players.values():
+				if t.team == p.team or t.is_ko or t.captured_by != 0 or t.invuln > 0.0:
+					continue
+				var d := Iso.fdist(t.position, p.position)
+				if d < best_d:
+					best = t
+					best_d = d
+			if best:
+				_capture(best, p, Player.Capture.GRABBED, float(g["hold"]))
+			else:
+				_cl_event.rpc("The Claw grabbed... nothing. Like a real claw machine.", Roster.TEAM_COLORS[p.team])
+		Roster.Gag.DANCE:
+			for t: Player in players.values():
+				if t.is_ko or Iso.fdist(t.position, p.position) > float(g["radius"]):
+					continue
+				if t.team == p.team:
+					t.hp = mini(t.max_hp, t.hp + int(g["heal"]))
+					_cl_buff.rpc(t.pid, 1.0, 0.1, t.hp)
+				elif t.captured_by == 0:
+					_cl_dance.rpc(t.pid, float(g["duration"]))
+
+
+func _tick_gags(delta: float) -> void:
+	# Mega Suck: drag enemies in, swallow anyone who gets close.
+	_vortex_pulse -= delta
+	var pulse := _vortex_pulse <= 0.0
+	if pulse:
+		_vortex_pulse = 0.15
+	for pid: int in _vortices.keys():
+		_vortices[pid] -= delta
+		var z: Player = players.get(pid)
+		if z == null or z.is_ko or _vortices[pid] <= 0.0:
+			_vortices.erase(pid)
+			continue
+		var g: Dictionary = z.data["gag"]
+		for t: Player in players.values():
+			if t.team == z.team or t.is_ko or t.captured_by != 0 or t.invuln > 0.0 or t.data.get("flying", false):
+				continue
+			var d := Iso.fdist(t.position, z.position)
+			if d <= 12.0:
+				_capture(t, z, Player.Capture.SWALLOWED, float(g["swallow_time"]))
+			elif d <= float(g["radius"]) and pulse:
+				var toward := Iso.to_floor(z.position - t.position).normalized()
+				_cl_pull.rpc(t.pid, toward * float(g["pull"]))
+	# Captures run out: spit them out / drop them.
+	for tid: int in _captures.keys():
+		var c: Dictionary = _captures[tid]
+		c["t"] -= delta
+		var by: Player = players.get(c["by"])
+		if c["t"] <= 0.0 or by == null or by.is_ko:
+			_release(tid)
+	# Satellite strikes land.
+	for strike in _strikes.duplicate():
+		strike["t"] -= delta
+		if strike["t"] > 0.0:
+			continue
+		_strikes.erase(strike)
+		var p: Player = players.get(strike["pid"])
+		if p == null:
+			continue
+		var g: Dictionary = p.data["gag"]
+		var at: Vector2 = strike["pos"]
+		var r := float(g["radius"])
+		for t: Player in players.values():
+			if t.team != p.team and Iso.fdist(t.position, at) <= r + Player.BODY_RADIUS:
+				_apply_hit(p, t, g, Iso.to_floor(t.position - at).normalized())
+		for item in level.mess_items:
+			if not item.knocked and Iso.fdist(item.position, at) <= r + 6.0:
+				_knock(item, Iso.to_floor(item.position - at))
+		for f in level.furniture:
+			if f.can_be_damaged() and Iso.fdist(f.position, at) <= r + f.reach():
+				_damage_furniture(f, float(g["demolition"]))
+		_spawn_debris("scorch", at)
+
+
+func _capture(t: Player, by: Player, mode: int, duration: float) -> void:
+	_captures[t.pid] = {"by": by.pid, "mode": mode, "t": duration}
+	_cl_capture.rpc(t.pid, by.pid, mode)
+	var what := "swallowed" if mode == Player.Capture.SWALLOWED else "grabbed"
+	# Whoever was holding the remote loses it to their captor.
+	if remote.state == TVRemote.State.CARRIED and remote.carrier_pid == t.pid:
+		remote.carrier_pid = by.pid
+		remote.hold = 0.0
+		_cl_event.rpc("%s %s %s AND the remote!" % [by.display_name, what, t.display_name], Roster.TEAM_COLORS[by.team])
+	else:
+		_cl_event.rpc("%s %s %s!" % [by.display_name, what, t.display_name], Roster.TEAM_COLORS[by.team])
+
+
+func _release(tid: int) -> void:
+	var c: Dictionary = _captures.get(tid, {})
+	_captures.erase(tid)
+	var t: Player = players.get(tid)
+	if t == null:
+		return
+	var by: Player = players.get(c.get("by", 0))
+	var dir := by.facing if by else Vector2.RIGHT
+	_cl_release.rpc(tid)
+	if by:
+		# Spat out (or dropped) with a thump.
+		_apply_hit(by, t, by.data["gag"], dir)
+
+
+@rpc("authority", "call_local", "reliable")
+func _cl_cloud(id: int, pos: Vector2, radius: float, duration: float, team: int) -> void:
+	var c := LitterCloud.new()
+	c.setup(id, pos, radius, duration, team)
+	level.entities.add_child(c)
+	var alive: Array[LitterCloud] = [c]
+	for old in clouds:
+		if is_instance_valid(old):
+			alive.append(old)
+	clouds = alive
+
+
+@rpc("authority", "call_local", "reliable")
+func _cl_satellite(pos: Vector2, delay: float, radius: float) -> void:
+	Fx.satellite(level.entities, pos, radius, delay)
+
+
+@rpc("authority", "call_local", "reliable")
+func _cl_scan(team: int, duration: float) -> void:
+	_scan_until[team] = _now() + duration
+	if local_player() and local_player().team == team:
+		hud.banner("SATELLITE SCAN", "Every hidden enemy is on screen", Roster.TEAM_COLORS[team])
+
+
+@rpc("authority", "call_local", "reliable")
+func _cl_capture(tid: int, by_pid: int, mode: int) -> void:
+	if players.has(tid):
+		players[tid].start_capture(by_pid, mode)
+
+
+@rpc("authority", "call_local", "reliable")
+func _cl_release(tid: int) -> void:
+	if players.has(tid):
+		players[tid].end_capture(Vector2.ZERO)
+
+
+@rpc("authority", "call_local", "reliable")
+func _cl_dance(tid: int, duration: float) -> void:
+	if players.has(tid):
+		players[tid].start_dance(duration)
+
+
+@rpc("authority", "call_local", "unreliable_ordered")
+func _cl_pull(tid: int, pull: Vector2) -> void:
+	if players.has(tid):
+		players[tid].apply_pull(pull)
+
+
 # =============================================================== furniture
 
 func report_furniture_hit(f: Furniture, amount: float) -> void:
@@ -722,12 +947,15 @@ func report_furniture_hit(f: Furniture, amount: float) -> void:
 func _srv_furniture_hit(idx: int, amount: float) -> void:
 	if not multiplayer.is_server() or phase != Phase.WAR or idx < 0 or idx >= level.furniture.size():
 		return
-	var f := level.furniture[idx]
+	_damage_furniture(level.furniture[idx], clampf(amount, 0.0, 120.0))
+
+
+func _damage_furniture(f: Furniture, amount: float) -> void:
 	if not f.can_be_damaged():
 		return
-	f.hp = maxf(0.0, f.hp - clampf(amount, 0.0, 120.0))
+	f.hp = maxf(0.0, f.hp - amount)
 	var now_wrecked := f.hp <= 0.0
-	_cl_furniture_state.rpc(idx, f.hp / f.max_hp, now_wrecked, 0.0, 0)
+	_cl_furniture_state.rpc(f.index, f.hp / f.max_hp, now_wrecked, 0.0, 0)
 	if now_wrecked:
 		_spawn_debris("scorch", f.position)
 		_cl_event.rpc("The %s is destroyed!" % _furniture_name(f), Color("ffb347"))
@@ -868,7 +1096,7 @@ func _tick_debris(delta: float) -> void:
 			if p.is_ko:
 				continue
 			var dist := Iso.fdist(p.position, d.position)
-			if phase == Phase.CLEANUP and p.data.get("vacuum", false) and dist <= 10.0 and d.kind in ["fur", "bolts"]:
+			if phase == Phase.CLEANUP and p.data.get("vacuum", false) and dist <= 10.0 and d.kind in ["fur", "bolts", "litter"]:
 				power = 100.0  # Zoomba just hoovers it up.
 				cleaner = p
 				break

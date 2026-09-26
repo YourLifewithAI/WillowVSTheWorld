@@ -315,6 +315,50 @@ SPRITES: dict[str, dict] = {
             "..kkkkk..",
         ],
     },
+    "w_bone": {  # Pepper's Big Bone (held upright, swung like a bat)
+        "palette": {"b": "#fff6ea", "s": "#e8d9b8"},
+        "rows": [
+            ".bb.bb.",
+            "bbbbbbb",
+            ".bbsbb.",
+            "..bsb..",
+            "..bsb..",
+            "..bsb..",
+            "..bsb..",
+            "..bsb..",
+            "..bsb..",
+            ".bbsbb.",
+            "bbbbbbb",
+            ".bb.bb.",
+        ],
+    },
+    "p_litter": {  # a litter box in flight
+        "palette": {"b": "#5d8fe0", "d": "#3f6ab0", "l": "#d8cdb8"},
+        "rows": [
+            ".llll.",
+            "bbbbbb",
+            "bddddb",
+            "bbbbbb",
+        ],
+    },
+    "litter": {  # spilled cat litter
+        "palette": {"a": "#d8cdb8", "b": "#b8ab94", "c": "#efe7d6"},
+        "rows": [
+            "..ab.ca..",
+            ".abcbbac.",
+            "abbacbbab",
+            ".ab..ba..",
+        ],
+    },
+    "p_bird": {  # one budgie of the flock
+        "palette": {"g": "#63d163", "y": "#ffe45c", "o": "#ff9a3c", "b": "#4a8ff0"},
+        "rows": [
+            "...yy.",
+            "..yyyo",
+            "bggg..",
+            ".gg...",
+        ],
+    },
     "p_rocket": {  # catnip rocket
         "palette": {"g": "#5cbf6a", "l": "#a8e6a0", "f": "#ff9a3c"},
         "rows": [

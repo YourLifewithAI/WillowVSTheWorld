@@ -139,10 +139,11 @@ func _pick(id: String) -> void:
 func _show_detail(id: String) -> void:
 	var c: Dictionary = Roster.get_char(id)
 	var sp: Dictionary = c["special"]
-	_detail.text = "%s the %s (%s): %s\nWeapon: %s   ·   Special: %s   ·   HP %d   ·   Speed %d\n+ %s\n- %s\nCleanup: %s" % [
+	var g: Dictionary = c["gag"]
+	_detail.text = "%s the %s (%s): %s\nWeapon: %s   ·   Special: %s   ·   HP %d   ·   Speed %d\nGag: %s. %s\n+ %s\n- %s\nCleanup: %s" % [
 		c["name"], c["species"], c["role"], c["blurb"],
 		c["weapon"]["name"], sp["name"], c["hp"], c["speed"],
-		c["strength"], c["weakness"], c["tidy_note"]]
+		g["name"], g["blurb"], c["strength"], c["weakness"], c["tidy_note"]]
 
 
 func _refresh() -> void:

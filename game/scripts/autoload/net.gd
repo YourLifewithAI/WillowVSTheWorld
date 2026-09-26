@@ -141,8 +141,10 @@ func _enter_lobby_as_host() -> void:
 	roster.clear()
 	roster[1] = _my_entry()
 	var bots := int(options.get("bots", "0"))
+	# Alternate teams, starting with the side the host isn't on.
+	var host_team: int = roster[1]["team"]
 	for i in bots:
-		add_bot((i + 1) % 2)
+		add_bot((host_team + 1 + i) % 2)
 	_goto_lobby()
 	_maybe_autostart()
 

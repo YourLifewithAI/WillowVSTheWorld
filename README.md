@@ -55,6 +55,19 @@ pets are sneaky and chaotic, the robots have sensors and are great at repairs.
 | **The Claw**, ceiling gantry | Wrecking Ball | Rides the ceiling; lifts heavy things alone | Long reboot after a KO |
 | **Bass**, smart speaker | Subwoofer Cannon | Cleaning playlist speeds up the team's tidying | No legs: tiny dash |
 
+Everyone also has a **gag**: a big, silly, charge-up move themed on what they are,
+which also plays to their strengths:
+
+| Gag | Who | What happens |
+|---|---|---|
+| **Litter Bomb** | the cats | A litter box bursts into a dust cloud; cats stay invisible inside it, everyone else is bogged down |
+| **Big Bone** | Pepper | Every whack is a home run, and a dog never drops the remote while holding a bone |
+| **Flock Call** | Kiwi | A stampede of budgies bowls over a whole lane; Kiwi rides along at top speed |
+| **Mega Suck** | Zoomba | Drags enemies in and swallows them (and the remote), then spits them out |
+| **Satellite Laser** | Unit-7 | Orbital strike from space, plus a scan that reveals every hidden pet |
+| **Claw Machine** | The Claw | Grabs whoever's underneath and carries them off, remote and all |
+| **Dance Party** | Bass | Every enemy nearby has to dance; allies heal |
+
 Furniture has health: the wrecking ball, bazooka and friends reduce couches, tables
 and walls to rubble, which has to be rebuilt before the parents get home.
 
@@ -77,6 +90,7 @@ add or remove them in the lobby.
 | Move | WASD / arrows | left stick |
 | Attack (hold for automatic weapons) | J | X |
 | Special | K | Y |
+| Gag (when the meter is full) | I or Q | Right bumper |
 | Dash | Space | A |
 | Throw the remote / hold to tidy | E | B |
 | Leave the match | Esc | |
