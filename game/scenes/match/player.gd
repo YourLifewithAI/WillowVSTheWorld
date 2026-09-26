@@ -174,8 +174,9 @@ func is_local() -> bool:
 	return seat >= 0
 
 
-## Ring and tag colour: the seat's colour when several people share the
-## screen (so everyone can find themselves), otherwise the team colour.
+## Arrow, tag and card colour: the seat's colour when several people share the
+## screen (so everyone can find themselves), otherwise the team colour. (The
+## ring under each character always shows its team.)
 func marker_color() -> Color:
 	if seat >= 0 and arena.shared_screen():
 		return Seats.color(seat)
@@ -798,14 +799,13 @@ func _process(delta: float) -> void:
 	elif stealthed and not is_ko:
 		var teams := arena.screen_teams()
 		if teams.size() > 1:
-			# Both teams share this screen, so everyone sees the same thing: a faint
-			# shimmer (just enough for its player to keep track of it), unless the
-			# other team has sniffed it out.
+			# Both teams share this screen, so nothing can be hidden from half the
+			# sofa: everyone sees hidden characters the way teammates do (bots and
+			# players on other machines still can't see them at all).
+			target_alpha = 0.4
 			if arena.is_revealed(self, 1 - team):
 				target_alpha = 0.85
 				_revealed = true
-			else:
-				target_alpha = 0.14 if moving and not hiding else 0.07
 		elif teams[0] == team:
 			target_alpha = 0.4
 		elif arena.is_revealed(self, teams[0]):
@@ -863,7 +863,7 @@ func _draw() -> void:
 	# Team ring (brighter, in the seat's colour, for people on this screen; red when revealed).
 	var ring := Iso.ellipse(9.0 if is_local() else 8.0, 20)
 	ring.append(ring[0])
-	var col: Color = Color("ff5a6e") if _revealed else marker_color()
+	var col: Color = Color("ff5a6e") if _revealed else Roster.TEAM_COLORS[team]
 	col.a = 0.95 if is_local() or _revealed else 0.55
 	draw_polyline(ring, col, 2.0 if is_local() and arena.shared_screen() else 1.0)
 	# The Claw hangs from a cable on a trolley that rides the ceiling rails.

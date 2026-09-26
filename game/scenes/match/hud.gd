@@ -5,9 +5,11 @@ extends CanvasLayer
 ## results card. Built in code; it sits on top of the pixel-art world at full
 ## resolution so text stays crisp.
 ##
-## Controllers never move the menus' focus (several people share one screen);
-## the menu and results are driven by each seat's + / - and bottom buttons
-## instead (see _poll_menus).
+## Controllers never move the menus' focus (several people share one screen,
+## see Seats); the menu and results are driven by each seat's + / - and bottom
+## buttons instead (see _poll_menus). Only the keyboard and mouse can end the
+## session: a menu opened from a controller offers "Keep playing" and "Back to
+## lobby".
 
 const KEY_HINT := "Move: WASD   Attack: J   Special: K   Gag: I   Dash: Space   Throw remote: E"
 const PAD_HINT := "Stick: move   Bottom: dash   Left: attack   Top: special   Right: throw the remote   SL/SR: gag   + or -: menu"
@@ -33,8 +35,14 @@ var _hint: Label
 var _results: Control
 var _pause: Control
 var _pause_buttons: Array[Button] = []
-var _pause_seat := 0
+## Who opened the menu: a seat, or -1 for the keyboard/mouse.
+var _pause_seat := -1
 var _pause_sel := 0
+var _muted_seat := -1
+## Why the game is paused right now ("menu", "lost").
+var _pause_reasons: Dictionary = {}
+var _lost_panel: Control
+var _lost_dismissed := false
 var _rematch: Button
 var _results_ready := false
 
@@ -63,6 +71,38 @@ func setup(match_node: Match) -> void:
 func _exit_tree() -> void:
 	if get_tree() and get_tree().paused:
 		get_tree().paused = false
+
+
+## Pauses while there's any reason to (and only when everyone playing is on this screen).
+func _set_paused(reason: String, on: bool) -> void:
+	if on:
+		_pause_reasons[reason] = true
+	else:
+		_pause_reasons.erase(reason)
+	get_tree().paused = arena.can_pause() and not _pause_reasons.is_empty()
+
+
+## Someone's controller dropped out: wait for it (when everyone is on this
+## screen), and tell them how to get back in.
+func show_lost(lost: Array[Player]) -> void:
+	if lost.is_empty():
+		_lost_dismissed = false
+	if _lost_panel:
+		_lost_panel.queue_free()
+		_lost_panel = null
+	if lost.is_empty() or _lost_dismissed or _results:
+		_set_paused("lost", false)
+		return
+	_lost_panel = _centered_panel()
+	var col: VBoxContainer = _lost_panel.get_child(0)
+	var who := ", ".join(lost.map(func(p: Player) -> String: return Seats.tag(p.seat)))
+	col.add_child(UiTheme.label("%s: controller disconnected" % who, 12, Seats.color(lost[0].seat).darkened(0.35)))
+	var help := UiTheme.label("Wake it up by pressing any button on it (if its lights keep running, pair it again:\n"
+		+ "hold the small round button on its inner edge). Or hold a spare Joy-Con sideways and press SL + SR.", 8)
+	col.add_child(help)
+	if arena.can_pause():
+		col.add_child(UiTheme.label("The game waits for them. Esc: carry on without them.", 8, UiTheme.COCOA))
+	_set_paused("lost", true)
 
 
 func _build_scoreboard() -> void:
@@ -328,8 +368,8 @@ func _update_card(c: Dictionary) -> void:
 		label.text = "%s: %s  %s" % [keys["special"], sp["name"], ready]
 
 
-## Controllers can't move the menus' focus (see _input), so each seat's
-## + / - opens the menu, and whoever opened it steers it.
+## Controllers can't move the menus' focus, so each seat's + / - opens the
+## menu (anyone's closes it), and whoever opened it steers it.
 func _poll_menus() -> void:
 	for p in arena.local_players():
 		var n := Seats.nav(p.seat)
@@ -338,16 +378,16 @@ func _poll_menus() -> void:
 				_rematch.pressed.emit()
 				return
 		elif _pause:
-			if p.seat != _pause_seat:
-				continue
 			if n["menu"]:
 				_toggle_pause()
 				return
-			if n["x"] != 0 and not _pause_buttons.is_empty():
+			if p.seat != _pause_seat or _pause_buttons.is_empty():
+				continue
+			if n["x"] != 0:
 				_pause_sel = posmod(_pause_sel + n["x"], _pause_buttons.size())
 				_pause_buttons[_pause_sel].grab_focus()
 				Audio.play("select", -6.0)
-			if n["ok"] and not _pause_buttons.is_empty():
+			if n["ok"]:
 				_pause_buttons[_pause_sel].pressed.emit()
 				return
 		elif n["menu"] and arena.phase != Match.Phase.RESULTS:
@@ -355,35 +395,42 @@ func _poll_menus() -> void:
 			return
 
 
-func _input(event: InputEvent) -> void:
-	if event is InputEventJoypadButton or event is InputEventJoypadMotion:
-		get_viewport().set_input_as_handled()
-
-
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("ui_cancel") and arena.phase != Match.Phase.RESULTS:
-		_toggle_pause(0)
+		if _lost_panel and not _pause:
+			# Carry on without whoever dropped out.
+			_lost_dismissed = true
+			show_lost([])
+		else:
+			_toggle_pause(-1)
 		get_viewport().set_input_as_handled()
 
 
-## Opens (or closes) the menu. Offline, where everyone playing is on this
-## screen, the game pauses while it's open.
-func _toggle_pause(opener: int = 0) -> void:
+## Opens (or closes) the menu. `opener` is the seat whose controller opened
+## it, or -1 for the keyboard/mouse. The game pauses if everyone playing is on
+## this screen; otherwise the opener's character stands still meanwhile.
+func _toggle_pause(opener: int = -1) -> void:
 	if _pause:
 		_pause.queue_free()
 		_pause = null
 		_pause_buttons.clear()
-		get_tree().paused = false
+		if _muted_seat >= 0:
+			Seats.set_muted(_muted_seat, false)
+			_muted_seat = -1
+		_set_paused("menu", false)
 		return
 	_pause_seat = opener
 	_pause_sel = 0
-	if not Net.online:
-		get_tree().paused = true
+	_set_paused("menu", true)
+	if not arena.can_pause():
+		_muted_seat = opener if opener >= 0 else Seats.keyboard_seat()
+		if _muted_seat >= 0:
+			Seats.set_muted(_muted_seat, true)
 	_pause = _centered_panel()
 	var col: VBoxContainer = _pause.get_child(0)
-	col.add_child(UiTheme.label("Paused" if not Net.online else "Menu", 12))
-	if arena.shared_screen() or Seats.uses_controller(opener):
-		col.add_child(UiTheme.label("%s: stick to choose, bottom button to pick, + or - to go back" % Seats.tag(opener), 7, UiTheme.COCOA))
+	col.add_child(UiTheme.label("Paused" if arena.can_pause() else "Menu", 12))
+	if opener >= 0:
+		col.add_child(UiTheme.label("%s: stick left/right to choose, bottom button to pick, + or - to go back" % Seats.tag(opener), 8, UiTheme.COCOA))
 	var row := HBoxContainer.new()
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
 	col.add_child(row)
@@ -391,13 +438,23 @@ func _toggle_pause(opener: int = 0) -> void:
 	stay.text = "Keep playing"
 	stay.pressed.connect(_toggle_pause)
 	row.add_child(stay)
-	var leave := Button.new()
-	leave.text = "Leave the match"
-	leave.pressed.connect(func() -> void:
-		get_tree().paused = false
-		Net.leave())
-	row.add_child(leave)
-	_pause_buttons = [stay, leave]
+	_pause_buttons = [stay]
+	if Net.is_host():
+		var lobby := Button.new()
+		lobby.text = "Back to lobby"
+		lobby.pressed.connect(func() -> void:
+			get_tree().paused = false
+			Net.return_to_lobby())
+		row.add_child(lobby)
+		_pause_buttons.append(lobby)
+	if opener < 0:
+		# Ending the whole session is for the keyboard or mouse only.
+		var leave := Button.new()
+		leave.text = "Leave the match"
+		leave.pressed.connect(func() -> void:
+			get_tree().paused = false
+			Net.leave())
+		row.add_child(leave)
 	col.add_child(HSeparator.new())
 	col.add_child(SoundSettings.build(false))
 	stay.grab_focus()
@@ -420,6 +477,10 @@ func _centered_panel() -> PanelContainer:
 func show_results(results: Dictionary) -> void:
 	if _pause:
 		_toggle_pause()
+	if _lost_panel:
+		_lost_panel.queue_free()
+		_lost_panel = null
+	_set_paused("lost", false)
 	_tidy_box.visible = false
 	_hint.text = ""
 	_phase.text = "THE PARENTS ARE HOME"
@@ -480,12 +541,12 @@ func show_results(results: Dictionary) -> void:
 		_rematch = again
 		# Everyone is still mashing buttons as the verdict appears: wait a moment
 		# before anything can start a rematch.
-		get_tree().create_timer(1.5).timeout.connect(func() -> void:
+		get_tree().create_timer(3.0).timeout.connect(func() -> void:
 			_results_ready = true
 			if is_instance_valid(again):
 				again.grab_focus())
 		if _pads_on_screen():
-			var hint := UiTheme.label("Press + or - on a controller for a rematch", 7, UiTheme.COCOA)
+			var hint := UiTheme.label("Press + or - on a controller to play again", 8, UiTheme.COCOA)
 			hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 			col.add_child(hint)
 	else:

@@ -79,8 +79,8 @@ if grep -q "FAIL  couch:" "$OUT/couch.log" || ! grep -q "^\[couch\] [0-9]* passe
   FAILED=1
 fi
 
-echo "== Network match (host + client over localhost, real time, ~70s)"
-"$GODOT" --headless --path "$GAME" -- --host --name=Host --map=farmhouse --bots=2 --autostart=2 --autopilot \
+echo "== Network match (host with a guest on its screen + a client, over localhost, real time, ~70s)"
+"$GODOT" --headless --path "$GAME" -- --host --name=Host --map=farmhouse --bots=2 --guests=1 --autostart=2 --autopilot \
   --war=30 --cleanup=15 --quit-after=62 > "$OUT/host.log" 2>&1 &
 HOST_PID=$!
 sleep 3
@@ -90,6 +90,17 @@ wait $HOST_PID
 no_script_errors "$OUT/host.log" "host"
 no_script_errors "$OUT/client.log" "client"
 if grep -q "map farmhouse" "$OUT/client.log"; then pass "the client loaded the host's map"; else fail "the client didn't load the host's map"; fi
+if grep -q "players 5 (2 on this screen)" "$OUT/host.log" && grep -q "players 5 (1 on this screen)" "$OUT/client.log"; then
+  pass "host (you + a guest), client and 2 bots all in the match on both machines"
+else
+  fail "player counts differ: host '$(grep -o 'players [0-9]* ([0-9]* on this screen)' "$OUT/host.log" | head -1)' client '$(grep -o 'players [0-9]* ([0-9]* on this screen)' "$OUT/client.log" | head -1)'"
+fi
+LOADED="$(grep -o 'everyone loaded after [0-9.]*' "$OUT/host.log" | head -1 | grep -o '[0-9.]*$')"
+if [ -n "$LOADED" ] && awk "BEGIN{exit !($LOADED < 3)}"; then
+  pass "the match started as soon as the client loaded (${LOADED}s), not after the 8 s timeout"
+else
+  fail "the match waited for the load timeout (${LOADED:-never}s)"
+fi
 HOST_RESULT="$(grep -o 'results tidy=.*' "$OUT/host.log" | head -1)"
 CLIENT_RESULT="$(grep -o 'results tidy=.*' "$OUT/client.log" | head -1)"
 if [ -n "$HOST_RESULT" ] && [ "$HOST_RESULT" = "$CLIENT_RESULT" ]; then

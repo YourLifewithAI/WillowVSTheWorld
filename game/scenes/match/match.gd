@@ -101,7 +101,9 @@ func _ready() -> void:
 	remote.position = remote.home
 	level.entities.add_child(remote)
 	hud.setup(self)
+	Seats.changed.connect(_on_seats_changed)
 	log_event("map %s" % Net.map_id)
+	log_event("players %d (%d on this screen)" % [players.size(), local_players().size()])
 	multiplayer.peer_disconnected.connect(_on_peer_disconnected)
 	if multiplayer.is_server():
 		_loaded[1] = true
@@ -160,6 +162,32 @@ func local_players() -> Array[Player]:
 	return out
 
 
+## Can the whole game stop (for the menu, or a dropped controller)? Only when
+## everyone playing is on this screen.
+func can_pause() -> bool:
+	return multiplayer.get_peers().is_empty()
+
+
+## A controller dropped out or came back. With everyone on this screen the game
+## waits for it (see Hud.show_lost); online the host lets a bot fill in.
+func _on_seats_changed() -> void:
+	if phase == Phase.LOADING or phase == Phase.RESULTS:
+		return
+	var lost: Array[Player] = []
+	for p in local_players():
+		var s = Seats.seat(p.seat)
+		var is_lost: bool = s != null and s.lost
+		if is_lost:
+			lost.append(p)
+		if Net.options.has("autopilot") or can_pause() or not multiplayer.is_server():
+			continue
+		if is_lost and not p.brain is BotBrain:
+			p.brain = BotBrain.new(p, self)
+		elif not is_lost and p.brain is BotBrain:
+			p.brain = SeatInput.new(p.seat)
+	hud.show_lost(lost)
+
+
 ## More than one person is playing on this screen.
 func shared_screen() -> bool:
 	var n := 0
@@ -216,6 +244,7 @@ func _check_all_loaded() -> void:
 func _start() -> void:
 	if phase != Phase.LOADING:
 		return
+	log_event("everyone loaded after %.1f s" % (8.0 - _load_timeout))
 	_cl_start.rpc()
 	_set_phase(Phase.COUNTDOWN, countdown_time)
 

@@ -1,10 +1,13 @@
 extends Control
 ## Pick your side, pick your character, wait for friends, start.
 ##
-## Friends on the same screen join by pressing a button on their own
-## controller (see Seats). Each seat then flips through the characters with
-## its stick, and anyone's + or - starts the match. Controllers never move the
-## menu's focus here; the keyboard and mouse work the menu as usual.
+## Friends on the same screen join on their own controller (see Seats for the
+## gestures). Each seat then flips through the characters with its stick, and
+## anyone's + or - starts a 3-second countdown (+ or - again cancels it).
+## Controllers never move the menu's focus; the keyboard and mouse work the
+## menu as usual.
+
+const COUNTDOWN := 3.0
 
 var _players_box: VBoxContainer
 var _info: Label
@@ -16,6 +19,8 @@ var _map_label: Label
 var _built := false
 var _badges: Dictionary = {}  # character id -> HBoxContainer of seat tags
 var _notice: Label
+var _free: Label
+var _countdown := -1.0
 
 
 func _ready() -> void:
@@ -33,13 +38,18 @@ func _exit_tree() -> void:
 	Seats.accepting_joins = false
 
 
-## Controllers pick characters and start; they never move the menu's focus.
-func _input(event: InputEvent) -> void:
-	if event is InputEventJoypadButton or event is InputEventJoypadMotion:
-		get_viewport().set_input_as_handled()
-
-
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
+	if _countdown >= 0.0:
+		var before := ceili(_countdown)
+		_countdown -= delta
+		if _countdown <= 0.0:
+			_countdown = -1.0
+			if Net.can_start():
+				Net.start_match()
+			return
+		if ceili(_countdown) != before:
+			Audio.play("tick")
+			_on_notice("Starting in %d...  (+ or - to wait)" % ceili(_countdown), Color("3a9f6a"))
 	for st in Seats.seats:
 		# Seat 0 on the keyboard uses the buttons; anyone with their own controller
 		# (or a guest on the keyboard) flips through characters instead.
@@ -51,14 +61,22 @@ func _process(_delta: float) -> void:
 			_show_detail(Seats.char_of(st.index))
 		if n["menu"]:
 			_try_start()
+	var free := Seats.free_controllers()
+	_free.text = "" if free.is_empty() else "Connected but not playing yet: " + ", ".join(free)
+	_free.visible = not free.is_empty()
 
 
+## A controller's + or -: start the countdown, or call it off.
 func _try_start() -> void:
 	if not Net.is_host():
 		return
-	if Net.can_start():
+	if _countdown >= 0.0:
+		_countdown = -1.0
+		_on_notice("Waiting. Press + or - when everyone's ready.", UiTheme.COCOA)
+	elif Net.can_start():
 		Audio.play("start")
-		Net.start_match()
+		_countdown = COUNTDOWN
+		_on_notice("Starting in 3...  (+ or - to wait)", Color("3a9f6a"))
 	else:
 		_on_notice("Each side needs at least one player: pick someone from the other team, or add a bot.", Color("e05a5a"))
 
@@ -194,12 +212,15 @@ func _build() -> void:
 			grid.add_child(b)
 			_char_buttons[id] = b
 	if Net.is_host():
-		var join := UiTheme.label("Playing on this screen? Press any button on your Joy-Con (held sideways) or controller to join. "
-			+ "Push the stick left or right to change character; + or - starts.", 8, UiTheme.COCOA)
+		var join := UiTheme.label("Join: hold a Joy-Con sideways and press SL + SR (two held as one, or a controller: L + R). "
+			+ "Stick: change character.  + or -: start.  Your number is on screen (not the Joy-Con's lights).", 8, UiTheme.COCOA)
 		join.autowrap_mode = TextServer.AUTOWRAP_WORD
 		join.custom_minimum_size.x = 360
 		rcol.add_child(join)
+	_free = UiTheme.label("", 7, UiTheme.COCOA)
+	rcol.add_child(_free)
 	_detail = UiTheme.label("", 8)
+	_detail.max_lines_visible = 7
 	_detail.autowrap_mode = TextServer.AUTOWRAP_WORD
 	_detail.custom_minimum_size = Vector2(360, 60)
 	rcol.add_child(_detail)
@@ -233,11 +254,19 @@ func _show_detail(id: String) -> void:
 		g["name"], g["blurb"], c["strength"], c["weakness"], c["tidy_note"]]
 
 
+func _row_order(id: int) -> int:
+	var entry: Dictionary = Net.roster[id]
+	if id == Net.my_id() or int(entry.get("owner", 0)) == Net.my_id():
+		return int(entry.get("seat", 0)) - 1000
+	return 0 if not entry["bot"] else 1000 - id
+
+
 func _refresh() -> void:
 	for child in _players_box.get_children():
 		child.queue_free()
+	# People on this screen first (by seat), then everyone else.
 	var ids: Array = Net.roster.keys()
-	ids.sort()
+	ids.sort_custom(func(a: int, b: int) -> bool: return _row_order(a) < _row_order(b))
 	for team in [Roster.Team.PETS, Roster.Team.ROBOTS]:
 		for id: int in ids:
 			var entry: Dictionary = Net.roster[id]
@@ -251,9 +280,7 @@ func _refresh() -> void:
 			var shared := mine and Seats.seats.size() > 1
 			if shared:
 				name_col = Seats.color(seat_index).darkened(0.35)
-				if id == Net.my_id():
-					row.add_child(UiTheme.label(Seats.tag(0), 9, name_col))
-			var you := "  (you)" if id == Net.my_id() else ""
+			var you := "  (you)" if id == Net.my_id() and not shared else ""
 			var host := "  ★ host" if id == 1 else ""
 			var holding := Seats.device_label(seat_index) if shared else ""
 			var label := UiTheme.label("%s%s%s" % [entry["name"], you, host], 9, name_col)
@@ -265,7 +292,10 @@ func _refresh() -> void:
 				kick.text = "x"
 				kick.tooltip_text = "Remove %s" % entry["name"]
 				kick.focus_mode = Control.FOCUS_NONE
+				kick.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 				kick.add_theme_font_size_override("font_size", 7)
+				for state in ["normal", "hover", "pressed"]:
+					kick.add_theme_stylebox_override(state, UiTheme.box(UiTheme.PEACH, UiTheme.COCOA, 3, 1, 1))
 				kick.pressed.connect(Seats.remove.bind(seat_index))
 				row.add_child(kick)
 			_players_box.add_child(row)

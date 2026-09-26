@@ -117,22 +117,29 @@ one screen (cast or plug the laptop into the TV).
    just plug in.
 2. **Start the game** and choose **Practice vs bots** (or **Host a game** if friends
    elsewhere are joining too).
-3. **In the lobby, everyone presses any button** on their controller. The first person
-   becomes P1, the next P2, and so on. Each person's tag (P1 red, P2 blue, P3 yellow,
-   P4 green...) marks their character on the character list, over their character's head
-   and on their card at the bottom of the screen.
-4. **Push the stick left or right** to change character. Anyone's **+ or -** starts
-   the match. Add bots with the buttons on the left to fill out the teams.
+3. **In the lobby, everyone joins:** hold your Joy-Con sideways and press **SL + SR**
+   together (the two small buttons on its inner edge), just like on a Switch. Two
+   Joy-Cons held together as one controller, or a Pro/Xbox controller: press **L + R**
+   (other controllers also join with any button). On the keyboard: **J**. The first
+   person becomes P1, the next P2, and so on. Each person's number and colour (P1 red,
+   P2 blue, P3 yellow, P4 green...) marks their pick on the character list, floats over
+   their character's head and labels their card at the bottom of the screen. Ignore the
+   lights on the Joy-Con itself.
+4. **Push the stick left or right** to change character. Anyone's **+ or -** starts a
+   3-second countdown (press again to wait). Add bots with the buttons on the left to
+   fill out the teams; if the house is full, bots make room for people.
 
 Good to know:
 - **A left and right Joy-Con count as two players** even though the computer merges
-  them into one controller. Each half is held sideways by a different person.
-- **If a Joy-Con disconnects** (they doze off after a while), wake it and press any
-  button: its player gets it back. Any spare controller works too.
-- **+ or - opens the menu**, and in Practice it pauses the game. The stick picks, the
-  bottom button chooses.
-- **Invisible cats and hidden Zoombas** can't be invisible to only half a sofa, so on a
-  shared screen they show as a faint shimmer that you have to watch for.
+  them into one controller: each person presses SL + SR on their own half.
+- **If a Joy-Con disconnects** (they doze off after a while), the game pauses until it's
+  back: wake it with any button and its player carries on (each Joy-Con is recognised).
+  A spare Joy-Con held sideways (SL + SR) can stand in. Esc carries on without them.
+- **+ or - opens the menu** (and pauses when everyone playing is on this screen). The
+  stick picks, the bottom button chooses. From a controller the menu offers "Keep
+  playing" and "Back to lobby"; only the keyboard or mouse can leave the match.
+- **Invisible cats and hidden Zoombas** can't be invisible to only half a sofa, so when
+  both teams share the screen they look the way teammates see them: see-through.
 - **Playing alone?** No joining needed: the keyboard and any controller just work.
 
 ### Playing with friends

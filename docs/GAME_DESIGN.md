@@ -283,8 +283,13 @@ actions are keyboard-only; controllers are read one by one by the `Seats` autolo
 Several people on one computer, one screen, a controller each.
 
 - **Seats.** Seat 0 is this machine's own player (the same roster entry online play
-  uses). People join in the lobby by pressing any button on a free controller: the
-  first takes seat 0, the rest become guests. Guests are roster entries owned by the
+  uses). People join in the lobby with the Switch's own gestures: SL + SR on a sideways
+  Joy-Con, L + R on a pair held together or a gamepad (gamepads and lone Joy-Cons also
+  take any face button; a pair's face buttons belong to two people, so they don't
+  join), J on the keyboard. The first takes seat 0 (then called "P1"), the rest become
+  guests. Until anyone joins with a controller, seat 0 hears the keyboard and every
+  controller (solo play needs no joining); after that each seat hears only its own, and
+  the keyboard only its own seat. If the house is full, a bot makes room. Guests are roster entries owned by the
   host, like bots (negative ids from the same counter, plus `owner` and `seat`), so
   the rules, the referee checks and online sync treat them like anyone else. Online
   friends can still join the same lobby.
@@ -293,21 +298,32 @@ Several people on one computer, one screen, a controller each.
   switched off from inside the game, so `Seats` splits the pair back into two halves and
   turns each half's stick and buttons a quarter turn. `tests/couch_test.gd` checks those
   turns against a model of SDL's own code for lone Joy-Cons.
-- **Drop-outs.** When a controller disconnects, its seat keeps its character. The next
-  controller of the same kind to connect takes it back (so when SDL swaps two lone
-  Joy-Cons for a pair, both people get their halves back). Any button on a spare
-  controller does the same.
+- **Drop-outs.** When a controller disconnects, its seat keeps its character, and the
+  game pauses (when everyone playing is on this screen; online, a bot fills in). Joy-Cons
+  are recognised by their Bluetooth address when they come back, including when SDL swaps
+  two lone Joy-Cons for a pair or back, so everyone gets their own half. A spare
+  controller of the same kind can stand in with the join gesture.
 - **Who's who.** Seat colours (P1 red, P2 blue, P3 yellow, P4 green, P5 purple, P6 pink,
   P7 teal, P8 white) on each character's ring and "P2" tag, their lobby pick, and a card
   per person along the bottom of the screen.
 - **Stealth on a shared screen.** If everyone on the sofa is on one team, stealth looks
   the same as online (teammates ghostly, enemies invisible). If both teams share the
-  screen, a hidden character is a faint shimmer for everyone unless the other team has
-  sniffed it out.
-- **Menus.** Controllers never move menu focus (several people would fight over it). Any
-  seat's + or - opens the menu (pausing the game in Practice, where nobody is on
-  another machine) and that seat steers it. The results card ignores everything for 1.5 s, then
-  + or - means rematch.
+  screen, hidden characters look the way teammates see them (see-through) for everyone:
+  nothing can be hidden from half a sofa. Bots and players on other machines still
+  can't see them, and ambushes still do double damage.
+- **Menus.** Controllers never move menu focus: the ui_* joypad events are removed at
+  start, and menus hear controllers through `Seats`. Any seat's + or - opens the menu
+  (pausing the game when everyone playing is on this screen; online, that seat's
+  character stands still instead) and that seat steers it; anyone's + or - closes it.
+  From a controller the menu offers only "Keep playing" and "Back to lobby": ending the
+  session is for the keyboard or mouse. In the lobby, + or - starts a 3-second countdown
+  that another press calls off. The results card ignores everything for 3 s, then + or -
+  means rematch. On the main menu, any controller button means Practice.
+- **Input edges.** Quick taps are latched as events arrive, and a seat that hasn't been
+  read for a tick (paused, captured, just joined) starts from what's already held, so
+  resuming or joining never fires a stray dash.
+- **Not yet:** guests on client machines (only the host's screen can share), rumble,
+  a pausable clock (the satellite scan and the ambush window run on wall-clock time).
 
 ## Art direction
 

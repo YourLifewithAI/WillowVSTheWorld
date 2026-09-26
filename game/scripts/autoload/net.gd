@@ -46,6 +46,8 @@ var autolaunched := false
 ##   --quit-after=SEC  exit after this long (prints a summary line)
 ##   --rematches=N     host automatically starts N rematches (soak testing)
 ##   --mute            no sound this run;  --audio-log  print every sound as it plays
+##   --guests=N        host adds N guests on its own screen (tests; drive them with --autopilot)
+##   --fake-pads=ID:KIND[:SERIAL],...   pretend controllers are plugged in (tests; see Seats)
 var options: Dictionary = {}
 
 var _next_local_id := -1
@@ -131,6 +133,7 @@ func join(address: String, port: int = DEFAULT_PORT) -> Error:
 
 ## Disconnect and (optionally) go back to the main menu.
 func leave(to_menu: bool = true) -> void:
+	get_tree().paused = false
 	if multiplayer.multiplayer_peer and not multiplayer.multiplayer_peer is OfflineMultiplayerPeer:
 		multiplayer.multiplayer_peer.close()
 	multiplayer.multiplayer_peer = OfflineMultiplayerPeer.new()
@@ -159,12 +162,19 @@ func _enter_lobby_as_host() -> void:
 	var host_team: int = roster[1]["team"]
 	for i in bots:
 		add_bot((host_team + 1 + i) % 2)
+	for i in int(options.get("guests", "0")):
+		var seat := Seats.Seat.new()
+		seat.index = i + 1
+		seat.roster_id = add_guest(seat.index)
+		Seats.seats.append(seat)
+	name_my_player()
 	_goto_lobby()
 	_maybe_autostart()
 
 
 func _my_entry() -> Dictionary:
-	return {"name": local_name, "char": local_char,
+	var shown := Seats.tag(0) if Seats.seats.size() > 1 else local_name
+	return {"name": shown, "char": local_char,
 		"team": Roster.get_char(local_char)["team"], "bot": false}
 
 
@@ -205,9 +215,17 @@ func add_bot(team: int) -> void:
 	_broadcast_roster()
 
 
+## Is there space for one more person on the host's screen? (Bots make way.)
+func has_room_for_guest() -> bool:
+	if roster.size() < MAX_PLAYERS:
+		return true
+	return roster.values().any(func(e: Dictionary) -> bool: return e["bot"])
+
+
 ## Host only: someone else on this screen joins (see Seats). Returns their id.
+## When the house is full, a bot goes home to make room.
 func add_guest(seat: int) -> int:
-	if not is_host() or roster.size() >= MAX_PLAYERS:
+	if not is_host() or not has_room_for_guest():
 		return 0
 	# Start them on the side with fewer people, as someone nobody is playing yet.
 	var used := []
@@ -224,12 +242,36 @@ func add_guest(seat: int) -> int:
 			break
 	if pick.is_empty():
 		pick = Roster.ids_for_team(team)[0]
+	if roster.size() >= MAX_PLAYERS:
+		_evict_bot(Roster.get_char(pick)["team"])
 	var id := _next_local_id
 	_next_local_id -= 1
 	roster[id] = {"name": "P%d" % (seat + 1), "char": pick, "team": Roster.get_char(pick)["team"],
 		"bot": false, "owner": my_id(), "seat": seat}
 	_broadcast_roster()
 	return id
+
+
+## Sends a bot home, preferring one from `team`.
+func _evict_bot(team: int) -> void:
+	var victim := 0
+	for id: int in roster:
+		if roster[id]["bot"] and (victim == 0 or roster[id]["team"] == team):
+			victim = id
+	if victim != 0:
+		roster.erase(victim)
+
+
+## With several people on the host's screen, its own player is "P1" (so the
+## feed and awards don't credit the laptop owner for someone else's plays).
+func name_my_player() -> void:
+	if not roster.has(my_id()):
+		return
+	var shared := Seats.seats.size() > 1
+	var want := Seats.tag(0) if shared else local_name
+	if roster[my_id()]["name"] != want:
+		roster[my_id()]["name"] = want
+		_broadcast_roster()
 
 
 func remove_guest(id: int) -> void:
@@ -285,6 +327,9 @@ func _srv_register(info: Dictionary) -> void:
 	if sender == 0:
 		sender = 1
 	var char_id: String = info.get("char", "willow")
+	if not roster.has(sender) and roster.size() >= MAX_PLAYERS:
+		(multiplayer.multiplayer_peer as ENetMultiplayerPeer).disconnect_peer(sender)
+		return
 	roster[sender] = {
 		"name": String(info.get("name", "Player")).left(16),
 		"char": char_id if Roster.CHARACTERS.has(char_id) else "willow",
@@ -315,6 +360,7 @@ func _cl_roster(new_roster: Dictionary, new_map: String) -> void:
 
 @rpc("authority", "call_local", "reliable")
 func _cl_begin_match(final_roster: Dictionary, final_map: String) -> void:
+	get_tree().paused = false
 	roster = final_roster
 	map_id = final_map
 	in_match = true
@@ -323,17 +369,19 @@ func _cl_begin_match(final_roster: Dictionary, final_map: String) -> void:
 
 @rpc("authority", "call_local", "reliable")
 func _cl_return_to_lobby() -> void:
+	get_tree().paused = false
 	_goto_lobby()
 
 
 func _maybe_autostart() -> void:
 	if not options.has("autostart") or in_match:
 		return
-	var humans := 0
-	for entry: Dictionary in roster.values():
-		if not entry["bot"]:
-			humans += 1
-	if humans >= int(options["autostart"]) and can_start():
+	# Count machines, not people: guests on the host's screen don't mean a friend has joined.
+	var machines := {}
+	for id: int in roster:
+		if not roster[id]["bot"]:
+			machines[int(roster[id].get("owner", id))] = true
+	if machines.size() >= int(options["autostart"]) and can_start():
 		# Give the newest client a moment to load the lobby scene.
 		get_tree().create_timer(0.5).timeout.connect(start_match)
 
