@@ -322,10 +322,14 @@ Several people on one computer, one screen, a controller each.
   turns each half's stick and buttons a quarter turn. `tests/couch_test.gd` checks those
   turns against a model of SDL's own code for lone Joy-Cons.
 - **Drop-outs.** When a controller disconnects, its seat keeps its character, and the
-  game pauses (when everyone playing is on this screen; online, a bot fills in). Joy-Cons
-  are recognised by their Bluetooth address when they come back, including when SDL swaps
-  two lone Joy-Cons for a pair or back, so everyone gets their own half. A spare
-  controller of the same kind can stand in with the join gesture.
+  game pauses (when everyone playing is on this screen; online, a bot fills in, and
+  hands the character back when the controller returns). SDL reports a lone Joy-Con's
+  Bluetooth address but gives a pair none at all, and it swaps two lone Joy-Cons for a
+  pair (or back) whenever one wakes or sleeps. So a returning lone Joy-Con goes to
+  whoever had that address, and a pair's halves go to the people waiting on that side
+  (left or right); when that's ambiguous, any button on the half picks it up. A spare
+  controller of the same kind can stand in with the join gesture, and J puts a P1 whose
+  controller died back on the keyboard.
 - **Who's who.** Seat colours (P1 red, P2 blue, P3 yellow, P4 green, P5 purple, P6 pink,
   P7 teal, P8 white) on each character's ring and "P2" tag, their lobby pick, and a card
   per person along the bottom of the screen.

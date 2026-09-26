@@ -24,6 +24,9 @@ const LONE_L_AGAIN := 15
 const PAIR2 := 16
 const SPLIT_R := 20
 const SPLIT_L := 21
+const REPAIRED := 22
+const OTHER_PAIR := 23
+const SPARE := 24
 
 var _passed := 0
 var _failed := 0
@@ -32,13 +35,14 @@ var _failed := 0
 func _ready() -> void:
 	# Stay alive while the game swaps scenes underneath us.
 	get_tree().current_scene = null
-	Seats.add_fake_device(PAIR, Seats.Kind.PAIR, "aa-aa-aa-aa-aa-01,bb-bb-bb-bb-bb-02")
+	# SDL gives a pair no serial at all (its halves' addresses are unknown).
+	Seats.add_fake_device(PAIR, Seats.Kind.PAIR, "")
 	Seats.add_fake_device(LONE_L, Seats.Kind.JOYCON_L)
 	Seats.add_fake_device(PRO, Seats.Kind.FULL)
-	Seats.add_fake_device(PAIR2, Seats.Kind.PAIR, "cc-cc-cc-cc-cc-03,dd-dd-dd-dd-dd-04")
+	Seats.add_fake_device(PAIR2, Seats.Kind.PAIR, "")
 	# If anything hangs, fail rather than hold up the whole test run.
-	get_tree().create_timer(60.0, true, false, true).timeout.connect(func() -> void:
-		check(false, "finished within a minute")
+	get_tree().create_timer(120.0, true, false, true).timeout.connect(func() -> void:
+		check(false, "finished within two minutes")
 		_finish())
 	_run.call_deferred()
 
@@ -250,6 +254,8 @@ func _run() -> void:
 	var p3_char: Player = locals[2]
 	await tap(LONE_L, Seats.B_START)
 	check(get_tree().paused, "P3's - opens the menu and pauses the game")
+	check(get_viewport().gui_get_focus_owner() == null,
+		"a menu opened from a controller doesn't take keyboard focus (the keyboard player can't press its buttons)")
 	p3_char.dash_cd = 0.0
 	button(LONE_L, Seats.B_SOUTH, true)
 	await frames(4)
@@ -269,14 +275,106 @@ func _run() -> void:
 		"P3 gets the Joy-Con back when it reconnects, and the game carries on")
 
 	# The first pair comes apart (SDL gives each half back as a lone Joy-Con, with
-	# new ids): each person gets their own half, recognised by its address.
+	# new ids and their addresses): each person gets their own half, by side.
 	Seats.remove_fake_device(PAIR)
 	Seats.add_fake_device(SPLIT_R, Seats.Kind.JOYCON_R, "bb-bb-bb-bb-bb-02")
 	Seats.add_fake_device(SPLIT_L, Seats.Kind.JOYCON_L, "aa-aa-aa-aa-aa-01")
 	await frames(3)
 	check(Seats.seat(0).device == SPLIT_R and Seats.seat(1).device == SPLIT_L and not get_tree().paused,
 		"when a pair comes apart, both people keep their own halves")
+	# ...and SDL pairs them up again (a new pair, no serial): same halves, same people.
+	Seats.remove_fake_device(SPLIT_R)
+	Seats.remove_fake_device(SPLIT_L)
+	Seats.add_fake_device(REPAIRED, Seats.Kind.PAIR, "")
+	await frames(3)
+	check(Seats.seat(0).device == REPAIRED and Seats.seat(0).side == "R" and Seats.seat(1).device == REPAIRED
+		and Seats.seat(1).side == "L" and not get_tree().paused, "when SDL pairs them up again, each keeps their side")
+	# A pair that isn't theirs (known to be other Joy-Cons) waits for a button:
+	# any face button on a half picks it up (not just SL + SR).
+	Seats.remove_fake_device(REPAIRED)
+	Seats.add_fake_device(OTHER_PAIR, Seats.Kind.PAIR, "ee-ee-ee-ee-ee-05,ff-ff-ff-ff-ff-06")
+	await frames(3)
+	check(Seats.seat(0).lost and Seats.seat(1).lost, "someone else's Joy-Cons don't take over anyone by themselves")
+	await tap(OTHER_PAIR, Seats.B_SOUTH)  # the right half's attack button
+	await tap(OTHER_PAIR, Seats.B_UP)  # the left half's attack button
+	check(Seats.seat(0).device == OTHER_PAIR and Seats.seat(0).side == "R" and Seats.seat(1).device == OTHER_PAIR
+		and Seats.seat(1).side == "L" and not get_tree().paused, "pressing any button on a half picks it up")
+
+	# "Esc: carry on without them" sticks, even when other controllers come and go.
+	Seats.remove_fake_device(LONE_L_AGAIN)
+	await frames(3)
+	check(Seats.seat(2).lost and get_tree().paused, "P3 drops out again: the game waits")
+	var esc := InputEventAction.new()
+	esc.action = "ui_cancel"
+	esc.pressed = true
+	Input.parse_input_event(esc)
+	await frames(3)
+	check(not get_tree().paused, "Esc carries on without P3")
+	Seats.add_fake_device(SPARE, Seats.Kind.FULL)
+	await frames(3)
+	Seats.remove_fake_device(SPARE)
+	await frames(3)
+	check(not get_tree().paused and Seats.seat(2).lost, "...and an unrelated controller coming and going doesn't pause it again")
+	Seats.add_fake_device(LONE_L_AGAIN, Seats.Kind.JOYCON_L)
+	await frames(3)
+	check(not Seats.seat(2).lost, "P3 is back when their Joy-Con returns")
+
+	await _keyboard_checks()
 	_finish()
+
+
+## A fresh session each: the laptop's keyboard (J) and a lone controller player.
+func _keyboard_checks() -> void:
+	# J first takes P1 for the keyboard; a controller joining later is P2.
+	Net.leave()
+	await frames(10)
+	Net.practice()
+	await frames(10)
+	await key(KEY_J)
+	check(Seats.seat(0).device == Seats.KEYBOARD and Seats.solo(), "J takes P1 for the keyboard")
+	await tap(PRO, Seats.B_SOUTH)
+	check(Seats.seats.size() == 2 and Seats.seat(1).device == PRO and Seats.keyboard_seat() == 0,
+		"a controller joining after that is P2, and the keyboard stays P1's")
+	# P2's controller dies in the lobby: the match notices as it starts.
+	Seats.remove_fake_device(PRO)
+	await frames(3)
+	Net.start_match()
+	var waited := 0
+	while (Match.current == null or Match.current.phase == Match.Phase.LOADING) and waited < 200:
+		await frames(5)
+		waited += 5
+	check(Match.current != null and get_tree().paused, "a controller lost before the match starts pauses it (the game waits)")
+	Seats.add_fake_device(PRO, Seats.Kind.FULL)
+	await frames(3)
+	check(not get_tree().paused, "...and carries on when it's back")
+
+	# Playing alone on a controller: the keyboard still works, and J rescues you
+	# if the controller dies.
+	Net.leave()
+	await frames(10)
+	Net.practice()
+	await frames(10)
+	await tap(PRO, Seats.B_SOUTH)
+	check(Seats.seat(0).device == PRO and Seats.keyboard_seat() == 0,
+		"alone on a controller, the keyboard still drives you")
+	Seats.remove_fake_device(PRO)
+	await frames(3)
+	check(Seats.seat(0).lost, "your controller dies")
+	await key(KEY_J)
+	check(not Seats.seat(0).lost and Seats.seat(0).device == Seats.KEYBOARD, "J carries on with the keyboard")
+	Net.leave()
+	await frames(5)
+
+
+func key(k: Key) -> void:
+	for down in [true, false]:
+		var e := InputEventKey.new()
+		e.keycode = k
+		e.physical_keycode = k
+		e.pressed = down
+		Input.parse_input_event(e)
+		Input.flush_buffered_events()
+		await frames(3)
 
 
 func _finish() -> void:

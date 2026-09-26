@@ -57,6 +57,9 @@ var last_error := ""
 
 
 func _ready() -> void:
+	# The fullscreen shortcut works while the game is paused too. (Net has
+	# no per-frame work, and its timers already ignore pausing.)
+	process_mode = Node.PROCESS_MODE_ALWAYS
 	for arg in OS.get_cmdline_user_args():
 		var parts := arg.trim_prefix("--").split("=", true, 1)
 		options[parts[0]] = parts[1] if parts.size() > 1 else "true"
@@ -180,6 +183,7 @@ func _my_entry() -> Dictionary:
 
 func _goto_lobby() -> void:
 	in_match = false
+	Seats.unmute_all()
 	get_tree().change_scene_to_file(LOBBY_SCENE)
 	joined_lobby.emit()
 	roster_changed.emit()
@@ -361,6 +365,7 @@ func _cl_roster(new_roster: Dictionary, new_map: String) -> void:
 @rpc("authority", "call_local", "reliable")
 func _cl_begin_match(final_roster: Dictionary, final_map: String) -> void:
 	get_tree().paused = false
+	Seats.unmute_all()
 	roster = final_roster
 	map_id = final_map
 	in_match = true

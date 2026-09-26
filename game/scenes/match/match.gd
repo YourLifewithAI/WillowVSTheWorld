@@ -69,6 +69,8 @@ var _remote_sync_t := 0.0
 var _progress_sync_t := 0.0
 var _load_timeout := 8.0
 var _nav_dirty := false
+## Players a bot is standing in for while their controller is gone (online).
+var _stand_ins: Dictionary = {}
 var _nav_t := 0.0
 var _next_cloud_id := 1
 var _vortices: Dictionary = {}  # Zoomba pid -> seconds left
@@ -169,7 +171,8 @@ func can_pause() -> bool:
 
 
 ## A controller dropped out or came back. With everyone on this screen the game
-## waits for it (see Hud.show_lost); online the host lets a bot fill in.
+## waits for it (see Hud.show_lost); online the host lets a bot fill in, and
+## hands the character back as soon as the controller returns.
 func _on_seats_changed() -> void:
 	if phase == Phase.LOADING or phase == Phase.RESULTS:
 		return
@@ -179,12 +182,13 @@ func _on_seats_changed() -> void:
 		var is_lost: bool = s != null and s.lost
 		if is_lost:
 			lost.append(p)
-		if Net.options.has("autopilot") or can_pause() or not multiplayer.is_server():
-			continue
-		if is_lost and not p.brain is BotBrain:
-			p.brain = BotBrain.new(p, self)
-		elif not is_lost and p.brain is BotBrain:
+		if not is_lost and _stand_ins.has(p):
+			_stand_ins.erase(p)
 			p.brain = SeatInput.new(p.seat)
+		elif is_lost and not _stand_ins.has(p) and not p.brain is BotBrain and not can_pause() \
+				and multiplayer.is_server() and not Net.options.has("autopilot"):
+			_stand_ins[p] = true
+			p.brain = BotBrain.new(p, self)
 	hud.show_lost(lost)
 
 
@@ -276,6 +280,8 @@ func _on_phase_entered() -> void:
 			hud.banner("The parents just left...", "Grab the TV remote!")
 			Audio.music("")
 			Audio.play("parents_leave")
+			# A controller may already have dropped out in the lobby or on the results screen.
+			_on_seats_changed()
 		Phase.WAR:
 			hud.banner("WAR!", "Carry the remote to your base")
 			Audio.play("whistle")
@@ -1272,6 +1278,9 @@ func _on_peer_disconnected(peer: int) -> void:
 			_cl_remove_player(id)
 	if multiplayer.is_server():
 		_check_all_loaded()
+	# If that was the last friend online, everyone left is on this screen:
+	# waiting for a dropped controller works like any couch game again.
+	_on_seats_changed.call_deferred()
 
 
 @rpc("authority", "call_local", "reliable")

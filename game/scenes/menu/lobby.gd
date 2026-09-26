@@ -236,10 +236,16 @@ func _on_char_focus(id: String) -> void:
 	_show_detail(id)
 
 
+## A click (or Enter) on a character: it's for whoever plays on the keyboard
+## and mouse, which is P1 unless P1 took a controller and the keyboard joined later.
 func _pick(id: String) -> void:
 	var c: Dictionary = Roster.get_char(id)
 	Audio.play("hi_" + String(c.get("voice", "cat")), 0.0, float(c.get("voice_pitch", 1.0)))
-	Net.choose_character(id)
+	var kb := Seats.keyboard_seat()
+	if kb > 0:
+		Net.set_guest_character(Seats.roster_id(kb), id)
+	else:
+		Net.choose_character(id)
 	_show_detail(id)
 	_refresh()
 
@@ -300,8 +306,16 @@ func _refresh() -> void:
 				kick.pressed.connect(Seats.remove.bind(seat_index))
 				row.add_child(kick)
 			_players_box.add_child(row)
+	# A keyboard guest flips characters with the arrow keys like a stick (see
+	# _process), so the tiles mustn't also take arrow-key focus.
+	var kb := Seats.keyboard_seat()
+	var kb_char := Seats.char_of(kb) if kb > 0 else Net.local_char
 	for id: String in _char_buttons:
-		_char_buttons[id].button_pressed = id == Net.local_char
+		var b: Button = _char_buttons[id]
+		b.button_pressed = id == kb_char
+		b.focus_mode = Control.FOCUS_NONE if kb > 0 else Control.FOCUS_ALL
+		if kb > 0 and b.has_focus():
+			b.release_focus()
 	# Seat tags on the characters people on this screen have picked.
 	for id: String in _badges:
 		for child in _badges[id].get_children():
@@ -323,5 +337,8 @@ func _refresh() -> void:
 		_start.disabled = not Net.can_start()
 		if _start.disabled:
 			_info.text += "  Each side needs at least one player (add a bot!)."
+			if _countdown >= 0.0:
+				_countdown = -1.0
+				_on_notice("Each side needs at least one player: pick someone from the other team, or add a bot.", Color("e05a5a"))
 	else:
 		_info.text = "Pets %d vs Robots %d. Waiting for the host to start...\n%s: %s" % [counts[0], counts[1], map["name"], map["blurb"]]

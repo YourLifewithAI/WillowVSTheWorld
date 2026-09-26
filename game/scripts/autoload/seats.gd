@@ -88,7 +88,9 @@ class Seat:
 	## including a whole pair held together.
 	var side := ""
 	var kind := 0
-	## The Joy-Con's Bluetooth address, to recognise it when it comes back.
+	## The Joy-Con's Bluetooth address, to recognise it when it comes back. SDL
+	## only reports it for a lone Joy-Con (never for a pair), so a seat keeps the
+	## last one it knew while it plays on half of a pair.
 	var mac := ""
 	## Its controller disconnected: it waits for that controller (or a spare one like it).
 	var lost := false
@@ -131,6 +133,12 @@ func _ready() -> void:
 			add_fake_device(int(parts[0]), kind_from_name(parts[1]), parts[2] if parts.size() > 2 else "")
 	reset()
 	Net.roster_changed.connect(_on_roster_changed)
+
+
+## Nobody's menu is open any more (a new match, or back to the lobby).
+func unmute_all() -> void:
+	for s in seats:
+		s.muted = false
 
 
 ## Back to just you (leaving a session).
@@ -227,15 +235,16 @@ func _kind(device: int) -> Kind:
 	return _devices.get(device, {}).get("kind", Kind.FULL)
 
 
-## The Bluetooth address of what (device, side) is: a pair's serial is "L,R".
+## The Bluetooth address of what (device, side) is, or "" if unknown. SDL gives
+## a lone Joy-Con its address as the serial, but a pair none at all (its
+## combined device is built without one), so pair halves are recognised by
+## side instead (see _returning_seat). A made-up "L,R" serial still splits.
 func _mac(device: int, side: String) -> String:
 	var serial: String = _devices.get(device, {}).get("serial", "")
 	var parts := serial.split(",")
-	if side == "L" and parts.size() == 2:
-		return parts[0]
-	if side == "R" and parts.size() == 2:
-		return parts[1]
-	return serial
+	if parts.size() == 2:
+		return parts[0] if side == "L" else parts[1] if side == "R" else ""
+	return "" if side != "" else serial
 
 
 ## What people can pick up and join with: [device, side] for every connected
@@ -305,26 +314,33 @@ func _device_gone(id: int) -> void:
 	changed.emit()
 
 
-## A controller turned up: give it back to whoever had it. Joy-Cons are
-## recognised by their Bluetooth address, which also covers SDL swapping two
-## lone Joy-Cons for a pair (each person gets their own half back). Anything
-## without an address goes to the one seat waiting for that kind of controller.
+## A controller turned up: give it back to whoever had it. SDL swaps two lone
+## Joy-Cons for a pair (and back) whenever one wakes or sleeps, so a pair's
+## halves go to the people waiting on that side, and a lone Joy-Con to
+## whoever had it (by address) or the one person waiting on its side.
 func _device_came(id: int) -> void:
 	var kind := _kind(id)
 	var sides := ["L", "R"] if kind == Kind.PAIR else [""]
-	var any := false
 	for side: String in sides:
-		var mac := _mac(id, side)
-		for s in lost_seats():
-			if not s.mac.is_empty() and s.mac == mac:
-				_claim(s, id, side)
-				any = true
-				break
-	if not any and lost_seats().size() == 1 and _mac(id, "").is_empty():
-		var s: Seat = lost_seats()[0]
-		if _fits(s, kind, ""):
-			_claim(s, id, "")
+		var s := _returning_seat(kind, side, _mac(id, side))
+		if s:
+			_claim(s, id, side)
 	changed.emit()
+
+
+## Whose controller is (kind, side, address)? The lost seat with that address;
+## else, when one of the two addresses isn't known, the only lost seat it fits.
+## A Joy-Con known to be someone else's waits for a button press (see _on_join).
+func _returning_seat(kind: Kind, side: String, mac: String) -> Seat:
+	var fitting: Array[Seat] = []
+	for s in lost_seats():
+		if not mac.is_empty() and s.mac == mac:
+			return s
+		if _fits(s, kind, side):
+			fitting.append(s)
+	if fitting.size() == 1 and (mac.is_empty() or fitting[0].mac.is_empty()):
+		return fitting[0]
+	return null
 
 
 ## Could a seat that held (s.kind, s.side) carry on with (kind, side)?
@@ -343,7 +359,9 @@ func _claim(s: Seat, device: int, side: String) -> void:
 	s.device = device
 	s.side = side
 	s.kind = _kind(device) if device >= 0 else Kind.FULL
-	s.mac = _mac(device, side) if device >= 0 else ""
+	var mac := _mac(device, side) if device >= 0 else ""
+	if not mac.is_empty() or device == KEYBOARD:
+		s.mac = mac
 	s.lost = false
 	_rebaseline(s)
 	s.nav_menu = true  # the press that joined doesn't also count as a menu press
@@ -379,7 +397,15 @@ func _join_gesture(device: int, side: String) -> bool:
 	if side == "L" or side == "R":
 		# A half of a pair held sideways: SL + SR.
 		var m: Dictionary = MAP_LEFT_HALF if side == "L" else MAP_RIGHT_HALF
-		return _b(device, m["gag"][0]) and _b(device, m["gag"][1])
+		if _b(device, m["gag"][0]) and _b(device, m["gag"][1]):
+			return true
+		# Someone whose Joy-Con dropped out can wake it with any button, even
+		# once SDL has paired it up with someone else's.
+		if _someone_waits_for(kind, side):
+			for b: int in _buttons_of(device, side, ["attack", "special", "dash", "interact"]):
+				if _b(device, b):
+					return true
+		return false
 	# L + R together (on a lone Joy-Con those are SL and SR).
 	var shoulders := _b(device, B_LEFT_SHOULDER) and _b(device, B_RIGHT_SHOULDER)
 	if kind == Kind.PAIR:
@@ -388,10 +414,26 @@ func _join_gesture(device: int, side: String) -> bool:
 	return shoulders or _b(device, B_SOUTH) or _b(device, B_EAST) or _b(device, B_WEST) or _b(device, B_NORTH)
 
 
+func _someone_waits_for(kind: Kind, side: String) -> bool:
+	for s in lost_seats():
+		if _fits(s, kind, side):
+			return true
+	return false
+
+
 func _on_join(device: int, side: String) -> void:
 	var kind := _kind(device)
-	# Someone whose controller dropped out picks up one like it.
-	if device != KEYBOARD:
+	var me := seats[0]
+	if device == KEYBOARD:
+		# P1's controller died: J carries on with the keyboard (lobby or match),
+		# unless someone else is already playing on it.
+		var kb := _keyboard_owner()
+		if me.lost and (kb == null or kb == me):
+			_claim(me, KEYBOARD, "")
+			changed.emit()
+			return
+	else:
+		# Someone whose controller dropped out picks up one like it.
 		for s in lost_seats():
 			if _fits(s, kind, side):
 				_claim(s, device, side)
@@ -399,11 +441,13 @@ func _on_join(device: int, side: String) -> void:
 				return
 	if not accepting_joins:
 		return
-	var me := seats[0]
 	if device == KEYBOARD:
-		# The keyboard is already yours unless a controller took seat 0.
+		# J makes the keyboard P1's, unless a controller already took P1.
 		if me.has_controller() or me.lost:
 			_add_guest(device, side)
+		elif me.device != KEYBOARD:
+			_claim(me, KEYBOARD, "")
+			_joined(me)
 		return
 	if not me.has_controller() and not me.lost and me.device != KEYBOARD:
 		_claim(me, device, side)
@@ -585,12 +629,15 @@ func keyboard_seat() -> int:
 
 
 ## Who the keyboard plays for: whoever joined with it, else seat 0 (unless a
-## controller took seat 0, in which case the keyboard plays nobody until it joins).
+## controller took seat 0 and others are playing too, in which case the keyboard
+## plays nobody until it joins). Someone playing alone always has the keyboard.
 func _keyboard_owner() -> Seat:
 	for s in seats:
 		if s.device == KEYBOARD:
 			return s
 	var me := seats[0]
+	if seats.size() == 1:
+		return me
 	return null if me.has_controller() or me.lost else me
 
 

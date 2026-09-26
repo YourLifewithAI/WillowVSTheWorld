@@ -42,7 +42,8 @@ var _muted_seat := -1
 ## Why the game is paused right now ("menu", "lost").
 var _pause_reasons: Dictionary = {}
 var _lost_panel: Control
-var _lost_dismissed := false
+## Seats whose dropped controller everyone agreed to carry on without (Esc).
+var _lost_dismissed: Dictionary = {}
 var _rematch: Button
 var _results_ready := false
 
@@ -69,6 +70,11 @@ func setup(match_node: Match) -> void:
 
 
 func _exit_tree() -> void:
+	# Leaving with the menu open (Back to lobby, or the host ending the match)
+	# mustn't leave anyone's character ignoring them next match.
+	if _muted_seat >= 0:
+		Seats.set_muted(_muted_seat, false)
+		_muted_seat = -1
 	if get_tree() and get_tree().paused:
 		get_tree().paused = false
 
@@ -85,15 +91,24 @@ func _set_paused(reason: String, on: bool) -> void:
 ## Someone's controller dropped out: wait for it (when everyone is on this
 ## screen), and tell them how to get back in.
 func show_lost(lost: Array[Player]) -> void:
-	if lost.is_empty():
-		_lost_dismissed = false
+	# Forget "carry on without them" for anyone who came back.
+	var still := {}
+	for p in lost:
+		still[p.seat] = true
+	for k: int in _lost_dismissed.keys():
+		if not still.has(k):
+			_lost_dismissed.erase(k)
+	var fresh := lost.filter(func(p: Player) -> bool: return not _lost_dismissed.has(p.seat))
 	if _lost_panel:
 		_lost_panel.queue_free()
 		_lost_panel = null
-	if lost.is_empty() or _lost_dismissed or _results:
+	if fresh.is_empty() or _results:
 		_set_paused("lost", false)
 		return
 	_lost_panel = _centered_panel()
+	if _pause:
+		# An open menu stays on top.
+		_root.move_child(_lost_panel.get_parent(), _pause.get_parent().get_index())
 	var col: VBoxContainer = _lost_panel.get_child(0)
 	var who := ", ".join(lost.map(func(p: Player) -> String: return Seats.tag(p.seat)))
 	col.add_child(UiTheme.label("%s: controller disconnected" % who, 12, Seats.color(lost[0].seat).darkened(0.35)))
@@ -385,7 +400,7 @@ func _poll_menus() -> void:
 				continue
 			if n["x"] != 0:
 				_pause_sel = posmod(_pause_sel + n["x"], _pause_buttons.size())
-				_pause_buttons[_pause_sel].grab_focus()
+				_highlight_pause_sel()
 				Audio.play("select", -6.0)
 			if n["ok"]:
 				_pause_buttons[_pause_sel].pressed.emit()
@@ -398,9 +413,14 @@ func _poll_menus() -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("ui_cancel") and arena.phase != Match.Phase.RESULTS:
 		if _lost_panel and not _pause:
-			# Carry on without whoever dropped out.
-			_lost_dismissed = true
-			show_lost([])
+			# Carry on without whoever dropped out (until someone else drops out).
+			for p in arena.local_players():
+				var st = Seats.seat(p.seat)
+				if st != null and st.lost:
+					_lost_dismissed[p.seat] = true
+			_lost_panel.queue_free()
+			_lost_panel = null
+			_set_paused("lost", false)
 		else:
 			_toggle_pause(-1)
 		get_viewport().set_input_as_handled()
@@ -457,12 +477,33 @@ func _toggle_pause(opener: int = -1) -> void:
 		row.add_child(leave)
 	col.add_child(HSeparator.new())
 	col.add_child(SoundSettings.build(false))
-	stay.grab_focus()
+	if opener >= 0:
+		# Steered by that seat's stick (see _poll_menus), never by keyboard focus:
+		# someone else may be playing on the keyboard meanwhile.
+		for b: Button in row.get_children():
+			b.focus_mode = Control.FOCUS_NONE
+		get_viewport().gui_release_focus()
+		_highlight_pause_sel()
+	else:
+		stay.grab_focus()
+
+
+## Shows which button a controller-opened menu has selected.
+func _highlight_pause_sel() -> void:
+	for i in _pause_buttons.size():
+		var b: Button = _pause_buttons[i]
+		if i == _pause_sel:
+			b.add_theme_stylebox_override("normal", b.get_theme_stylebox("hover"))
+			b.add_theme_color_override("font_color", b.get_theme_color("font_hover_color"))
+		else:
+			b.remove_theme_stylebox_override("normal")
+			b.remove_theme_color_override("font_color")
 
 
 func _centered_panel() -> PanelContainer:
 	var holder := CenterContainer.new()
 	holder.set_anchors_preset(Control.PRESET_FULL_RECT)
+	holder.mouse_filter = Control.MOUSE_FILTER_IGNORE  # only the panel itself takes clicks
 	_root.add_child(holder)
 	var panel := PanelContainer.new()
 	holder.add_child(panel)

@@ -133,14 +133,16 @@ Good to know:
 - **A left and right Joy-Con count as two players** even though the computer merges
   them into one controller: each person presses SL + SR on their own half.
 - **If a Joy-Con disconnects** (they doze off after a while), the game pauses until it's
-  back: wake it with any button and its player carries on (each Joy-Con is recognised).
-  A spare Joy-Con held sideways (SL + SR) can stand in. Esc carries on without them.
+  back: wake it with any button and its player carries on. If it comes back as half of
+  a pair and the game can't tell whose it is, press any button on that half. A spare
+  Joy-Con held sideways (SL + SR) can stand in. Esc carries on without them.
 - **+ or - opens the menu** (and pauses when everyone playing is on this screen). The
   stick picks, the bottom button chooses. From a controller the menu offers "Keep
   playing" and "Back to lobby"; only the keyboard or mouse can leave the match.
 - **Invisible cats and hidden Zoombas** can't be invisible to only half a sofa, so when
   both teams share the screen they look the way teammates see them: see-through.
-- **Playing alone?** No joining needed: the keyboard and any controller just work.
+- **Playing alone?** No joining needed: the keyboard and any controller just work. If
+  you joined on a controller and it dies, press J to carry on with the keyboard.
 
 ### Playing with friends
 
