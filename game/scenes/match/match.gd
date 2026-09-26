@@ -57,6 +57,8 @@ var stats: Dictionary = {}  # pid -> {"bonks", "caps", "fixes"}
 var results: Dictionary = {}
 var clouds: Array[LitterCloud] = []
 var _scan_until: Dictionary = {}  # team -> time
+## Last second the countdown clock ticked (the final ten seconds tick).
+var _last_tick := -1
 
 # Host only.
 var _loaded: Dictionary = {}
@@ -195,18 +197,38 @@ func _cl_phase(p: int, t: float, new_scores: Array) -> void:
 
 func _on_phase_entered() -> void:
 	log_event("phase %s" % Phase.keys()[phase])
+	_last_tick = -1
 	match phase:
 		Phase.COUNTDOWN:
 			hud.banner("The parents just left...", "Grab the TV remote!")
+			Audio.music("")
+			Audio.play("parents_leave")
 		Phase.WAR:
 			hud.banner("WAR!", "Carry the remote to your base")
+			Audio.play("whistle")
+			Audio.music("war")
 		Phase.WHISTLE:
 			hud.banner("CAR IN THE DRIVEWAY!", "Truce! Hide the evidence!")
 			for p: Player in players.values():
 				p.reset_for_phase()
+			Audio.music("", 0.3)
+			Audio.play("car_horn")
 		Phase.CLEANUP:
 			hud.banner("CLEAN UP!", "Fix everything before they walk in")
+			Audio.play("whistle")
+			Audio.music("cleanup")
 	hud.on_phase_changed()
+
+
+## The clock ticks through the last ten seconds of the war and the cleanup.
+func _tick_clock() -> void:
+	if phase != Phase.WAR and phase != Phase.CLEANUP:
+		return
+	var sec := ceili(time_left)
+	if sec < 1 or sec > 10 or (_last_tick >= 0 and sec >= _last_tick):
+		return
+	_last_tick = sec
+	Audio.play("tick", 0.0 if sec <= 3 else -4.0, 1.25 if sec <= 3 else 1.0)
 
 
 # ============================================================== main loop
@@ -218,6 +240,7 @@ func _physics_process(delta: float) -> void:
 		level.room.clock_progress = 1.0 - time_left / maxf(war_time, 1.0)
 	elif phase == Phase.CLEANUP:
 		level.room.clock_progress = 1.0 - time_left / maxf(cleanup_time, 1.0)
+	_tick_clock()
 	if not multiplayer.is_server():
 		return
 
@@ -316,6 +339,9 @@ func _cl_results(final_scores: Array, tidy: float, verdict: int, winner: int, fi
 	stats = final_stats
 	results = {"tidy": tidy, "verdict": verdict, "winner": winner}
 	level.room.door_open = true
+	Audio.music("", 0.3)
+	Audio.play(["spotless", "fine", "grounded"][verdict])
+	Audio.music_after("menu", 3.5)
 	log_event("results tidy=%.2f verdict=%s winner=%d score=%d-%d" % [tidy, Verdict.keys()[verdict], winner, scores[0], scores[1]])
 	hud.show_results(results)
 	Net.matches_played += 1
@@ -434,6 +460,7 @@ func _cl_scored(pid: int, team: int, new_scores: Array) -> void:
 	if level.tv:
 		level.tv.channel = team
 	level.bases[team].pulse = 1.0
+	Audio.play("score")
 	var who: String = players[pid].display_name if players.has(pid) else "Someone"
 	hud.banner("%s SCORE!" % Roster.TEAM_NAMES[team].to_upper(), "%s changed the channel" % who, Roster.TEAM_COLORS[team])
 	log_event("score team=%d by=%d -> %d-%d" % [team, pid, scores[0], scores[1]])
@@ -442,7 +469,7 @@ func _cl_scored(pid: int, team: int, new_scores: Array) -> void:
 @rpc("authority", "call_local", "unreliable_ordered")
 func _cl_remote(state: int, carrier: int, pos: Vector2, pz: float, hold: float) -> void:
 	remote.apply_net(state, carrier, pos, pz)
-	remote.hold_frac = hold
+	remote.apply_hold(hold)
 	for p: Player in players.values():
 		p.carrying = state == TVRemote.State.CARRIED and p.pid == carrier
 
@@ -677,9 +704,12 @@ func _knock(item: MessItem, dir: Vector2) -> void:
 @rpc("authority", "call_local", "reliable")
 func _cl_mess_state(idx: int, knocked: bool, offset: Vector2) -> void:
 	var item := level.mess_items[idx]
+	var was_knocked := item.knocked
 	item.apply_state(knocked, offset, 0.0, 0)
 	if knocked:
 		log_event("knocked %s" % item.name)
+	if knocked != was_knocked:
+		Audio.play_at("knock" if knocked else "tidy", level.entities, item.position)
 
 
 @rpc("authority", "call_local", "unreliable_ordered")
@@ -889,6 +919,7 @@ func _cl_cloud(id: int, pos: Vector2, radius: float, duration: float, team: int)
 	var c := LitterCloud.new()
 	c.setup(id, pos, radius, duration, team)
 	level.entities.add_child(c)
+	Audio.play_at("poof_big", level.entities, pos)
 	var alive: Array[LitterCloud] = [c]
 	for old in clouds:
 		if is_instance_valid(old):
@@ -899,6 +930,8 @@ func _cl_cloud(id: int, pos: Vector2, radius: float, duration: float, team: int)
 @rpc("authority", "call_local", "reliable")
 func _cl_satellite(pos: Vector2, delay: float, radius: float) -> void:
 	Fx.satellite(level.entities, pos, radius, delay)
+	Audio.play_at("sat_lock", level.entities, pos)
+	Audio.play_later("sat_beam", delay, level.entities, pos)
 
 
 @rpc("authority", "call_local", "reliable")
@@ -966,6 +999,10 @@ func _cl_furniture_state(idx: int, hp_frac: float, wrecked: bool, progress: floa
 	var f := level.furniture[idx]
 	var was_wrecked := f.wrecked
 	f.apply_state(hp_frac, wrecked, progress, helpers)
+	if wrecked != was_wrecked:
+		Audio.play_at("crash" if wrecked else "rebuilt", level.entities, f.position)
+	elif not wrecked and hp_frac < 1.0:
+		Audio.play_at("crack", level.entities, f.position, -3.0)
 	if wrecked != was_wrecked:
 		Fx.boom(level.entities, f.position, f.reach(), false)
 		_nav_dirty = true
@@ -1077,6 +1114,7 @@ func _cl_debris_add(id: int, kind: String, pos: Vector2) -> void:
 @rpc("authority", "call_local", "reliable")
 func _cl_debris_remove(id: int) -> void:
 	if debris.has(id):
+		Audio.play_at("scrub", level.entities, debris[id].position, -2.0)
 		debris[id].queue_free()
 		debris.erase(id)
 

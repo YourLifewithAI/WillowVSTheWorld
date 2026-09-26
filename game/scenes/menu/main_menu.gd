@@ -6,11 +6,13 @@ var _ip_edit: LineEdit
 var _status: Label
 var _parade: Array[Control] = []
 var _t := 0.0
+var _sound_panel: Control
 
 
 func _ready() -> void:
 	theme = UiTheme.build()
 	_build()
+	Audio.music("menu")
 	Net.connection_failed.connect(_on_failed)
 	Net.disconnected.connect(_on_failed)
 	if not Net.last_error.is_empty():
@@ -92,10 +94,18 @@ func _build() -> void:
 	join.pressed.connect(func() -> void: _join_address(_ip_edit.text))
 	join_row.add_child(join)
 	form.add_child(join_row)
+	var bottom_row := HBoxContainer.new()
+	var sound := Button.new()
+	sound.text = "Sound"
+	sound.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	sound.pressed.connect(_toggle_sound)
+	bottom_row.add_child(sound)
 	var quit := Button.new()
 	quit.text = "Quit"
-	quit.pressed.connect(get_tree().quit)
-	form.add_child(quit)
+	quit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	quit.pressed.connect(Audio.quit_game)
+	bottom_row.add_child(quit)
+	form.add_child(bottom_row)
 
 	_status = UiTheme.label("", 9, Color("e05a5a"))
 	_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -116,6 +126,28 @@ func _process(delta: float) -> void:
 	_t += delta
 	for k in _parade.size():
 		_parade[k].position.y = 360 - 62 - absf(sin(_t * 4.0 + k * 0.7)) * 6.0
+
+
+func _toggle_sound() -> void:
+	if _sound_panel:
+		_sound_panel.queue_free()
+		_sound_panel = null
+		return
+	_sound_panel = CenterContainer.new()
+	_sound_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
+	add_child(_sound_panel)
+	var panel := PanelContainer.new()
+	_sound_panel.add_child(panel)
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 6)
+	panel.add_child(col)
+	col.add_child(UiTheme.label("Sound", 12))
+	col.add_child(SoundSettings.build())
+	var done := Button.new()
+	done.text = "Done"
+	done.pressed.connect(_toggle_sound)
+	col.add_child(done)
+	done.grab_focus()
 
 
 func _host() -> void:

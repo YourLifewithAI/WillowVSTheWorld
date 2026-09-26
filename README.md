@@ -71,6 +71,12 @@ which also plays to their strengths:
 Furniture has health: the wrecking ball, bazooka and friends reduce couches, tables
 and walls to rubble, which has to be rebuilt before the parents get home.
 
+Everything makes a noise: every weapon, gag and KO (each character has their own
+voice), the parents' car pulling away and honking back into the driveway, a ticking
+clock in the last ten seconds, and a chiptune soundtrack for the menus, the war and
+the cleanup. Volume controls are under **Sound** on the title screen and in the
+Esc menu.
+
 ![All the placeholder sprites](docs/images/sprites.png)
 
 ## Play it
@@ -117,6 +123,7 @@ game/                     the Godot project (open game/project.godot)
   assets/sprites/         pixel art (placeholders)
 docs/GAME_DESIGN.md       the game design document
 tools/make_sprites.py     regenerates the placeholder sprites from text grids
+tools/make_sounds.py      synthesizes the placeholder sound effects and music
 tools/smoke_test.sh       headless end-to-end tests
 ```
 
@@ -130,6 +137,11 @@ tools/smoke_test.sh       headless end-to-end tests
   is where they touch the floor. [Aseprite](https://www.aseprite.org) is the go-to
   pixel-art tool. The placeholders come from `python3 tools/make_sprites.py`
   (needs `pip install pillow`); delete an entry there once you have real art for it.
+- **Replace the sounds** the same way: overwrite the `.wav` with the same name in
+  `game/assets/sounds/` (or swap it for an `.ogg`, deleting the `.wav`). Music lives in
+  `game/assets/music/` as `menu`, `war` and `cleanup`. The placeholders come from `python3 tools/make_sounds.py`
+  (needs `pip install numpy soundfile`). Each move's sound is named in the roster
+  (`sfx`, `hit_sfx`, ...), so you can also point a move at a different sound there.
 
 ### Tests
 
@@ -137,8 +149,9 @@ tools/smoke_test.sh       headless end-to-end tests
 tools/smoke_test.sh path/to/godot
 ```
 
-Runs headless (no window): imports the project, plays a full 3v3 bot match on
-every home at top speed, then plays a real host + client network match over
+Runs headless (no window): imports the project, checks that every sound the game
+asks for exists, plays a full 3v3 bot match on every home at top speed (checking the
+phase sounds and music fire), then plays a real host + client network match over
 localhost and checks that both machines agree on the map and the result. Takes
 about a minute and a half. The same
 checks run on GitHub for every push (`.github/workflows/smoke-test.yml`).
@@ -146,5 +159,5 @@ checks run on GitHub for every push (`.github/workflows/smoke-test.yml`).
 The game also takes launch options after `--`, which the tests use:
 `--practice`, `--host`, `--join=IP`, `--map=studio`, `--bots=N`, `--char=willow`, `--autostart=N`,
 `--autopilot`, `--war=SECONDS`, `--cleanup=SECONDS`, `--quit-after=SECONDS`,
-`--screenshot=PATH@SECONDS`. For example, `godot --path game -- --practice --bots=5 --autostart=1`
+`--screenshot=PATH@SECONDS`, `--mute`, `--audio-log` (prints every sound as it plays). For example, `godot --path game -- --practice --bots=5 --autostart=1`
 drops you straight into a 3v3 match.

@@ -1,6 +1,6 @@
 # Willow VS The World: Game Design Document
 
-*Living document. Version 0.4: four homes, over-the-top weapons, gags, stealth, and furniture you can destroy.*
+*Living document. Version 0.5: four homes, over-the-top weapons, gags, stealth, furniture you can destroy, and sound.*
 
 ## The pitch
 
@@ -297,12 +297,45 @@ Remap in Godot: *Project > Project Settings > Input Map*.
 **Next art pass:** walk/attack/KO animation frames (2-4 frames each), 4-direction
 facing for characters, furniture sprites, a proper pixel font.
 
-## Audio direction (not started)
+## Audio direction
 
-Soft lo-fi living-room loop in phase 1 with a sneaky synth layer that rises as the
-clock runs down; a frantic ragtime/kazoo remix for cleanup. SFX should be squeaky
-and cartoonish: boing, boop, vacuum whirr, dial-up modem for robot KOs, a
-car-door slam for the whistle, keys in the lock for the verdict.
+**Now (placeholders):** everything is synthesized by `tools/make_sounds.py` out of
+square, triangle, saw and noise waves, like an old console. That gives a
+consistent chiptune palette, nothing to license, and a sound for every event
+today, but none of it has been tuned by ear against real play yet.
+
+| Moment | What you hear |
+|---|---|
+| Menus and lobby | "Lazy Afternoon": swung, jazzy music box over a walking bass (88 BPM loop) |
+| Countdown | The front door closes and the parents' car pulls away |
+| War | Referee whistle, then "Remote Control": bouncy A-minor chiptune (150 BPM) |
+| Car in the driveway | Music cuts, *honk honk* |
+| Cleanup | Whistle, then "Hide the Evidence": a frantic chase with a ticking-clock woodblock (176 BPM) |
+| Last 10 seconds of either phase | The clock ticks (louder for the final three) |
+| Verdict | A fanfare (spotless), a happy "ok!" (fine) or a sad trombone (grounded), then the menu music returns |
+| Scoring | TV static, then a fanfare |
+| Changing the channel | A rising blip every quarter of the 2-second hold |
+| Weapons, specials, gags | One sound each: *pew* laser, catnip *fwoomp*, tennis-ball *thock*, egg whistle and *splat*, dust *pff*, toaster spring and *ding*, wrecking-ball whoosh, subwoofer *womp*; bark, feathers, suction, rocket fist, belly-flop *boing* and landing *thud*, claw servo and *clank*, hype arpeggio; litter *poof*, "ta-da!" for the Big Bone, a flock of tweets, a 3-second vacuum roar, satellite lock-on beeps and beam, the claw-machine jingle, a disco groove |
+| Getting hit | *Bop* for small hits, *BONK* for 20+ damage, a sting on ambushes, a spring *boing* when Zoomba flips |
+| KOs | Each character has a voice: meow (pitched up for Willow, down for Biscuit), yelp, tweet, robot power-down, vacuum spin-down, claw servo droop, and a tape-stop for Bass |
+| Picking a character | Their happy hello: meow, *woof woof*, tweet, beep-boop, motor rev, servo whirr, bass drop + chime |
+| The house | Wood cracks, a big crash when furniture breaks, a ratchet and *ding* when it's rebuilt, clatter when things get knocked over, sparkles when they're fixed |
+
+**How it works:** the `Audio` autoload plays sounds by name (`res://assets/sounds/<name>.wav`
+or `.ogg`) and music from `res://assets/music/`. World sounds are positional, so they
+pan with where they happened. Every machine plays its own sounds from the same events
+that draw the effects, so audio adds no network traffic. The roster names each move's
+sound (`sfx`, `hit_sfx`, `land_sfx`, `swing_sfx`) and each character's `voice`. When
+lots is going on, gunfire and small hits are dropped first so the important cues
+always get through. Volumes (everything / music / effects) live in the main menu's
+**Sound** panel and the in-match Esc menu, and are saved to `user://settings.cfg`.
+
+**Where real audio should go next:** a composer pass on the three loops (the war
+track could add a sneaky layer that rises as the clock runs down; cleanup wants a
+ragtime/kazoo feel), recorded or designed SFX for the character voices (animal noises are the
+hardest thing to fake with a synthesizer), a dial-up modem gag for robot KOs, keys in the lock
+before the verdict. Replace any sound by overwriting the file with the same name in
+`game/assets/sounds/` and deleting its recipe from `tools/make_sounds.py`.
 
 ## Technology
 
@@ -327,12 +360,15 @@ game/
   project.godot                 engine settings, input map
   scripts/core/                 Iso (projection maths), Roster (balance sheet), UiTheme
   scripts/autoload/net.gd       connections, lobby roster, launch options
+  scripts/autoload/audio.gd     sound effects, music, volume settings
   scenes/menu/                  main menu, lobby
   scenes/level/                 building blocks: Room, Furniture, MessItem, BaseZone, FloorZone
   scenes/maps/                  the homes (one scene each)
   scenes/match/                 match rules, players, bots, remote, HUD, effects
   assets/sprites/               PNGs (placeholder art)
+  assets/sounds/, assets/music/ WAV effects and OGG music loops (placeholder audio)
 tools/make_sprites.py           regenerate placeholder sprites
+tools/make_sounds.py            regenerate placeholder sounds and music
 tools/smoke_test.sh             headless end-to-end tests
 ```
 
@@ -372,7 +408,7 @@ needs tuning against **human** playtests.
 | Milestone | Goal |
 |---|---|
 | **M0: Prototype** (this) | Full loop playable vs bots and over LAN: war, KOs, mess, cleanup, verdict. |
-| **M1: Feel** | Sound and music, hit-stop, screen shake, squash-and-stretch animation frames, controller rumble, a juicier whistle moment (car headlights sweep the room). |
+| **M1: Feel** | ~~Sound and music~~ (placeholder chiptune in; needs an ear and real playtests), hit-stop, screen shake, squash-and-stretch animation frames, controller rumble, a juicier whistle moment (car headlights sweep the room). |
 | **M2: Real art** | Animated character sprites, furniture sprites, UI art, a pixel font, a title screen. |
 | **M3: Content** | More homes (see the list above), a backyard, 2 more characters per side, home events (the doorbell, a delivery drone, the cat flap, the smart home's lights turning off). |
 | **M4: Online** | Internet play without port forwarding (relay or Steam/Epic networking), invite codes, reconnects, lag compensation for hits. |

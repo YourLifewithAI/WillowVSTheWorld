@@ -42,6 +42,7 @@ var autolaunched := false
 ##   --screenshot=PATH@SEC     save a screenshot, then keep running
 ##   --quit-after=SEC  exit after this long (prints a summary line)
 ##   --rematches=N     host automatically starts N rematches (soak testing)
+##   --mute            no sound this run;  --audio-log  print every sound as it plays
 var options: Dictionary = {}
 
 var _next_bot_id := -1
@@ -75,7 +76,7 @@ func _ready() -> void:
 func _quit_with_summary() -> void:
 	if Match.current:
 		print("[summary:%d] %s" % [my_id(), Match.current.summary()])
-	get_tree().quit()
+	Audio.quit_game()
 
 
 func _screenshot(path: String) -> void:
