@@ -90,6 +90,7 @@ func _physics_process(delta: float) -> void:
 				arena.report_furniture_hit(f, float(spec.get("demolition", 0.0)))
 			if not spec.get("through_walls", false):
 				Fx.burst(arena.level.entities, position + Vector2(0, -z), Color.WHITE)
+				Audio.play_at("thud", arena.level.entities, position, -6.0)
 				queue_free()
 				return
 	if not authoritative:
@@ -114,6 +115,9 @@ func _explode(arena: Match) -> void:
 	_done = true
 	var radius := float(spec.get("explode_radius", 16.0))
 	Fx.boom(arena.level.entities, position, radius, spec.get("look", "") == "egg")
+	# Bigger blasts sound deeper. (The litter bomb's cloud makes its own noise.)
+	if ability != 2:
+		Audio.play_at(spec.get("hit_sfx", "boom"), arena.level.entities, position, 0.0, clampf(24.0 / radius, 0.8, 1.3))
 	if authoritative:
 		shooter.hit_area(position, radius, ability, float(spec["knock"]), float(spec.get("demolition", 0.0)), ambush)
 		if ability == 2:

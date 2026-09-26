@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Headless smoke tests: the project imports cleanly, a full bot match runs from
-# countdown to the parents' verdict, and a host + client play a networked match
-# that ends with the same result on both machines.
+# Headless smoke tests: the project imports cleanly, every sound the game asks
+# for exists, a full bot match runs from countdown to the parents' verdict (with
+# its sound cues), and a host + client play a networked match that ends with the
+# same result on both machines.
 #
 # Usage: tools/smoke_test.sh [path/to/godot]      (default: `godot` on PATH)
 set -uo pipefail
@@ -20,18 +21,36 @@ no_script_errors() {  # file, label
   else
     pass "$2: no script errors"
   fi
+  if grep -qE "leaked at exit|still in use at exit|Audio: no (sound|music) called" "$1"; then
+    fail "$2: engine warnings"; grep -E "leaked at exit|still in use at exit|Audio: no (sound|music) called" "$1" | head -5
+  fi
 }
 
 echo "== Import"
 "$GODOT" --headless --path "$GAME" --import > "$OUT/import.log" 2>&1
 no_script_errors "$OUT/import.log" "import"
 
+echo "== Every sound the scripts and the roster name exists"
+MISSING=""
+# (Names built at runtime, like "ko_" + voice, are covered by the voice list.)
+NAMES="$(grep -rohE '(Audio\.play(_at|_later)?|sound)\("[a-z_]+"' "$GAME/scenes" "$GAME/scripts" | sed -E 's/.*\("//; s/"$//' | grep -v '_$')
+  $(grep -ohE '"(sfx|hit_sfx|land_sfx|swing_sfx)": "[a-z_]+"' "$GAME/scripts/core/roster.gd" | sed -E 's/.*: "//; s/"$//')
+  $(grep -ohE '"voice": "[a-z]+"' "$GAME/scripts/core/roster.gd" | sed -E 's/.*: "(.*)"/hi_\1 ko_\1/')
+  spotless fine grounded"
+for S in $(echo $NAMES | tr ' ' '\n' | sort -u); do
+  [ -f "$GAME/assets/sounds/$S.wav" ] || [ -f "$GAME/assets/sounds/$S.ogg" ] || MISSING="$MISSING $S"
+done
+for M in $(grep -rohE 'Audio\.music(_after)?\("[a-z_]+"' "$GAME/scenes" "$GAME/scripts" | sed -E 's/.*\("//; s/"$//' | sort -u); do
+  [ -f "$GAME/assets/music/$M.ogg" ] || MISSING="$MISSING music/$M"
+done
+if [ -z "$MISSING" ]; then pass "all $(echo $NAMES | tr ' ' '\n' | sort -u | wc -l) sounds found"; else fail "missing sounds:$MISSING"; fi
+
 MAPS="living_room studio farmhouse suburbs"
 for MAP in $MAPS; do
   echo "== Practice match on $MAP (3v3 bots, simulated as fast as possible)"
   LOG="$OUT/practice_$MAP.log"
   "$GODOT" --headless --path "$GAME" --fixed-fps 60 -- \
-    --practice --map="$MAP" --bots=5 --autostart=1 --autopilot --war=90 --cleanup=30 --quit-after=140 \
+    --practice --map="$MAP" --bots=5 --autostart=1 --autopilot --war=90 --cleanup=30 --quit-after=140 --audio-log \
     > "$LOG" 2>&1
   no_script_errors "$LOG" "$MAP"
   for step in "map $MAP" "phase WAR" "phase WHISTLE" "phase CLEANUP" "results tidy="; do
@@ -40,6 +59,15 @@ for MAP in $MAPS; do
   if grep -q "] ko " "$LOG"; then pass "$MAP had KOs"; else fail "$MAP had no KOs"; fi
   if grep -q "] knocked " "$LOG"; then pass "$MAP made a mess"; else fail "$MAP: nothing got knocked over"; fi
   if grep -q "score team=" "$LOG"; then pass "$MAP: bots found their way to a base"; else fail "$MAP: nobody scored (bots stuck?)"; fi
+  for cue in "parents_leave" "whistle" "car_horn" "music war" "music cleanup"; do
+    grep -q "\[audio\] $cue\$" "$LOG" || MISSED_CUE="$cue"
+  done
+  if [ -z "${MISSED_CUE:-}" ] && grep -qE "\[audio\] (spotless|fine|grounded)$" "$LOG"; then
+    pass "$MAP: phase sounds and music played ($(grep -c '^\[audio\]' "$LOG") sounds in all)"
+  else
+    fail "$MAP: missing sound cue ${MISSED_CUE:-verdict jingle}"
+  fi
+  unset MISSED_CUE
 done
 
 echo "== Network match (host + client over localhost, real time, ~70s)"

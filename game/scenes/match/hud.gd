@@ -282,6 +282,8 @@ func _toggle_pause() -> void:
 	leave.text = "Leave"
 	leave.pressed.connect(func() -> void: Net.leave())
 	row.add_child(leave)
+	col.add_child(HSeparator.new())
+	col.add_child(SoundSettings.build())
 	stay.grab_focus()
 
 

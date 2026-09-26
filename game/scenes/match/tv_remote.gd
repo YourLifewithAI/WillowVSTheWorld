@@ -19,6 +19,10 @@ var hold := 0.0
 
 ## 0..1 progress of the carrier changing the channel (synced for display).
 var hold_frac := 0.0
+## What this machine last heard about the remote, for sound effects.
+var _heard_state: State = State.HOME
+var _heard_carrier := 0
+var _hold_step := 0
 
 var _net_pos := Vector2.ZERO
 var _sprite: Sprite2D
@@ -49,12 +53,46 @@ func carrier() -> Player:
 func apply_net(new_state: int, new_carrier: int, pos: Vector2, pz: float) -> void:
 	if new_state == State.DROPPED and state != State.DROPPED and arena:
 		timer = arena.remote_return_time
+	_play_transition(new_state as State, new_carrier, pos)
 	state = new_state as State
 	carrier_pid = new_carrier
 	_net_pos = pos
 	z = pz
 	if position.distance_to(pos) > 60.0:
 		position = pos
+
+
+## Changing-the-channel progress: a rising blip every quarter.
+func apply_hold(frac: float) -> void:
+	hold_frac = frac
+	var step := int(frac * 4.0)
+	if step > _hold_step and arena:
+		Audio.play_at("channel_tick", arena.level.entities, position, 0.0, 1.0 + 0.2 * step)
+	_hold_step = step
+
+
+func _play_transition(new_state: State, new_carrier: int, pos: Vector2) -> void:
+	var old := _heard_state
+	var old_carrier := _heard_carrier
+	_heard_state = new_state
+	_heard_carrier = new_carrier
+	if arena == null or (new_state == old and new_carrier == old_carrier):
+		return
+	var sfx := ""
+	match new_state:
+		State.CARRIED:
+			sfx = "pickup"
+		State.FLYING:
+			sfx = "throw"
+		State.DROPPED:
+			sfx = "drop" if old == State.CARRIED else "thud"
+		State.HOME:
+			# Scoring has its own fanfare; putting it back during cleanup sparkles.
+			if old == State.DROPPED:
+				sfx = "remote_home"
+			elif arena.phase == Match.Phase.CLEANUP:
+				sfx = "tidy"
+	Audio.play_at(sfx, arena.level.entities, pos)
 
 
 func _process(delta: float) -> void:

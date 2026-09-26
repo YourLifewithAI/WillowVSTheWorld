@@ -40,9 +40,28 @@ static func build() -> Theme:
 	t.set_stylebox("focus", "LineEdit", box(Color(0, 0, 0, 0), Color("ff9f68"), 4, 2, 4))
 	t.set_color("font_color", "LineEdit", INK)
 
+	t.set_stylebox("slider", "HSlider", box(Color("e8ddd0"), COCOA, 3, 1, 3))
+	t.set_stylebox("grabber_area", "HSlider", box(Color("ff9f68"), COCOA, 3, 1, 3))
+	t.set_stylebox("grabber_area_highlight", "HSlider", box(Color("ffb98f"), COCOA, 3, 1, 3))
+	t.set_icon("grabber", "HSlider", _knob(PEACH))
+	t.set_icon("grabber_highlight", "HSlider", _knob(Color.WHITE))
+
 	t.set_stylebox("background", "ProgressBar", box(Color("3b2a30"), Color("3b2a30"), 2, 1, 0))
 	t.set_stylebox("fill", "ProgressBar", box(Color("8ff0a4"), Color("3b2a30"), 2, 1, 0))
 	return t
+
+
+## A chunky round slider knob.
+static func _knob(fill: Color) -> ImageTexture:
+	var img := Image.create(12, 12, false, Image.FORMAT_RGBA8)
+	for y in 12:
+		for x in 12:
+			var d := Vector2(x - 5.5, y - 5.5).length()
+			if d <= 4.2:
+				img.set_pixel(x, y, fill)
+			elif d <= 5.9:
+				img.set_pixel(x, y, COCOA)
+	return ImageTexture.create_from_image(img)
 
 
 static func label(text: String, size: int = 10, color: Color = INK, outline: bool = false) -> Label:

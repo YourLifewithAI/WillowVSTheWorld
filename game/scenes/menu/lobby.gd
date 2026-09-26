@@ -8,11 +8,13 @@ var _char_buttons: Dictionary = {}
 var _detail: Label
 var _map_pick: OptionButton
 var _map_label: Label
+var _built := false
 
 
 func _ready() -> void:
 	theme = UiTheme.build()
 	_build()
+	Audio.music("menu")
 	Net.roster_changed.connect(_refresh)
 	_refresh()
 
@@ -81,9 +83,12 @@ func _build() -> void:
 	btn_row.add_child(leave)
 	if Net.is_host():
 		_start = Button.new()
+		_start.set_meta("silent", true)
 		_start.text = "Start! (parents leave)"
 		_start.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		_start.pressed.connect(Net.start_match)
+		_start.pressed.connect(func() -> void:
+			Audio.play("start")
+			Net.start_match())
 		btn_row.add_child(_start)
 
 	# Right: pick a character.
@@ -102,6 +107,7 @@ func _build() -> void:
 		for id in Roster.ids_for_team(team):
 			var c: Dictionary = Roster.get_char(id)
 			var b := Button.new()
+			b.set_meta("silent", true)  # says hello instead of clicking
 			b.toggle_mode = true
 			b.custom_minimum_size = Vector2(88, 64)
 			b.tooltip_text = c["blurb"]
@@ -119,7 +125,7 @@ func _build() -> void:
 			b.add_child(v)
 			b.pressed.connect(_pick.bind(id))
 			b.mouse_entered.connect(_show_detail.bind(id))
-			b.focus_entered.connect(_show_detail.bind(id))
+			b.focus_entered.connect(_on_char_focus.bind(id))
 			grid.add_child(b)
 			_char_buttons[id] = b
 	_detail = UiTheme.label("", 8)
@@ -128,9 +134,19 @@ func _build() -> void:
 	rcol.add_child(_detail)
 	_show_detail(Net.local_char)
 	_char_buttons[Net.local_char].grab_focus()
+	_built = true
+
+
+## Moving between characters with the keyboard or a gamepad blips.
+func _on_char_focus(id: String) -> void:
+	if _built and not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+		Audio.play("select", -6.0)
+	_show_detail(id)
 
 
 func _pick(id: String) -> void:
+	var c: Dictionary = Roster.get_char(id)
+	Audio.play("hi_" + String(c.get("voice", "cat")), 0.0, float(c.get("voice_pitch", 1.0)))
 	Net.choose_character(id)
 	_show_detail(id)
 	_refresh()

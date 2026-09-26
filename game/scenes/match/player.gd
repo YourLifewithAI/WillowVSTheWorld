@@ -224,7 +224,10 @@ func _owner_tick(delta: float) -> void:
 		_follow_captor()
 		return
 	if arena.phase == Match.Phase.WAR and not is_ko:
+		var was_ready := gag_charge >= 1.0
 		gag_charge = minf(1.0, gag_charge + delta / GAG_CHARGE_TIME)
+		if gag_charge >= 1.0 and not was_ready and is_local():
+			Audio.play("gag_ready")
 
 	var inp := _gather_input()
 	var free_to_act := arena.can_move() and not is_ko and stun <= 0.0
@@ -550,6 +553,7 @@ func _play_action(action: int, dir: Vector2) -> void:
 	match action:
 		Action.ATTACK:
 			var w := weapon_spec()
+			sound(w.get("swing_sfx", w.get("sfx", "")))
 			if _weapon_is_melee():
 				_swing = 1.0
 				_squash = 0.2
@@ -561,9 +565,11 @@ func _play_action(action: int, dir: Vector2) -> void:
 			_squash = 0.3
 			if not stealthed:
 				Fx.puff(fx_parent, position, Color(1, 1, 1, 0.8))
+				sound("dash", -4.0)
 		Action.GAG:
 			var g: Dictionary = data["gag"]
 			_squash = 0.4
+			sound(g.get("sfx", ""))
 			match int(g["kind"]):
 				Roster.Gag.BONE, Roster.Gag.MEGA_SUCK:
 					gag_t = g["duration"]
@@ -577,12 +583,15 @@ func _play_action(action: int, dir: Vector2) -> void:
 			Fx.text(fx_parent, position + Vector2(0, -sprite_height() - z - 10), String(g["name"]).to_upper() + "!", Color("ffd84d"))
 		Action.SPECIAL:
 			var sp: Dictionary = data["special"]
+			if int(sp["kind"]) == Roster.Special.VANISH:
+				Fx.puff(fx_parent, position, Color(0.8, 0.8, 0.9, 0.9))
+				sound(sp.get("sfx", ""), -6.0)
+				return  # No shout: that would give it away.
+			sound(sp.get("sfx", ""))
 			match int(sp["kind"]):
-				Roster.Special.VANISH:
-					Fx.puff(fx_parent, position, Color(0.8, 0.8, 0.9, 0.9))
-					return  # No shout: that would give it away.
 				Roster.Special.SLAM:
 					_telegraph = sp["windup"]
+					Audio.play_later(sp.get("land_sfx", ""), float(sp["windup"]), fx_parent, position)
 				Roster.Special.PULL:
 					Fx.ring(fx_parent, position, sp["radius"], Color("62f2ff"), true)
 				Roster.Special.AURA:
@@ -595,6 +604,7 @@ func _play_action(action: int, dir: Vector2) -> void:
 # ================================================= events from the host
 
 func on_damaged(new_hp: int, knock: Vector2, stun_time: float, ambushed: bool) -> void:
+	sound("hit_big" if hp - new_hp >= 20 else "hit")
 	hp = new_hp
 	_flash = 0.15
 	_squash = 0.3
@@ -603,9 +613,11 @@ func on_damaged(new_hp: int, knock: Vector2, stun_time: float, ambushed: bool) -
 	if data.get("flips", false) and stun_time >= 1.4:
 		_flip_t = stun_time
 		Fx.text(arena.level.entities, position + Vector2(0, -18 - z), "FLIPPED!", Color.WHITE)
+		sound("flip")
 	Fx.burst(arena.level.entities, position + Vector2(0, -8 - z), Color.WHITE)
 	if ambushed:
 		Fx.text(arena.level.entities, position + Vector2(0, -26 - z), "AMBUSH!", Color("ff5a6e"))
+		sound("ambush")
 	if is_multiplayer_authority():
 		knock_vel = knock
 		stun = maxf(stun, stun_time)
@@ -625,6 +637,7 @@ func set_ko(value: bool) -> void:
 			_break_stealth(0.0)
 			z = 0.0
 		Fx.text(arena.level.entities, position + Vector2(0, -24), "KO!", Color("ffd84d"))
+		sound("ko_" + String(data.get("voice", "cat")), 0.0, float(data.get("voice_pitch", 1.0)))
 
 
 func respawn(at: Vector2) -> void:
@@ -638,6 +651,7 @@ func respawn(at: Vector2) -> void:
 		knock_vel = Vector2.ZERO
 		stun = 0.0
 	Fx.puff(arena.level.entities, at, Roster.TEAM_COLORS[team])
+	sound("respawn", -3.0)
 
 
 func start_capture(by_pid: int, mode: int) -> void:
@@ -649,9 +663,11 @@ func start_capture(by_pid: int, mode: int) -> void:
 		_break_stealth(0.5)
 	var what := "GULP!" if mode == Capture.SWALLOWED else "GOTCHA!"
 	Fx.text(arena.level.entities, position + Vector2(0, -20 - z), what, Color.WHITE)
+	sound("gulp" if mode == Capture.SWALLOWED else "grab")
 
 
 func end_capture(knock: Vector2) -> void:
+	sound("spit" if capture_mode == Capture.SWALLOWED else "thud")
 	captured_by = 0
 	capture_mode = Capture.NONE
 	if is_multiplayer_authority():
@@ -698,6 +714,12 @@ func reset_for_phase() -> void:
 		vanish_t = 0.0
 		_slam_t = 0.0
 		z = hover()
+
+
+## A sound from this character, panned to where it is on screen.
+func sound(sound_name: String, volume_db: float = 0.0, pitch: float = 1.0) -> void:
+	if arena and arena.level:
+		Audio.play_at(sound_name, arena.level.entities, position, volume_db, pitch)
 
 
 # ================================================================== visuals

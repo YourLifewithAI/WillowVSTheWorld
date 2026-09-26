@@ -24,6 +24,7 @@ stretch = true
 
 [node name="SubViewport" type="SubViewport" parent="World"]
 disable_3d = true
+audio_listener_enable_2d = true
 handle_input_locally = false
 snap_2d_transforms_to_pixel = true
 snap_2d_vertices_to_pixel = true
