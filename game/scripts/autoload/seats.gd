@@ -110,8 +110,14 @@ class Seat:
 	var last_read := -100
 	var nav_x := 0
 	var nav_repeat := 0.0
+	var nav_y := 0
+	var nav_repeat_y := 0.0
 	var nav_menu := false
 	var nav_ok := false
+	var nav_alt := false
+	## What it last pressed or pushed ([device, side]; seat 0 alone hears
+	## everything), so hints can show the right buttons.
+	var last_unit := [KEYBOARD, ""]
 
 	func has_controller() -> bool:
 		return device >= 0
@@ -288,6 +294,7 @@ func _process(delta: float) -> void:
 	_poll_joins()
 	for s in seats:
 		s.nav_repeat = maxf(0.0, s.nav_repeat - delta)
+		s.nav_repeat_y = maxf(0.0, s.nav_repeat_y - delta)
 
 
 ## Remembers quick taps (pressed and released between two ticks) until the seat reads them.
@@ -388,6 +395,7 @@ func _claim(s: Seat, device: int, side: String) -> void:
 	_rebaseline(s)
 	s.nav_menu = true  # the press that joined doesn't also count as a menu press
 	s.nav_ok = true
+	s.nav_alt = true
 	if was_lost:
 		notice.emit("%s is back!" % tag(s.index), color(s.index))
 
@@ -575,12 +583,13 @@ func read(index: int) -> Dictionary:
 	return out
 
 
-## Menus: this seat's stick left/right (-1, 0, 1) as a step (repeating while
-## held), and whether + / - ("menu") or the bottom button ("ok") was just pressed.
+## Menus: this seat's stick left/right and up/down (-1, 0, 1) as steps
+## (repeating while held), and whether + / - ("menu"), the bottom button
+## ("ok") or the top button ("alt") was just pressed.
 func nav(index: int) -> Dictionary:
 	var s := seat(index)
 	if s == null:
-		return {"x": 0, "menu": false, "ok": false}
+		return {"x": 0, "y": 0, "menu": false, "ok": false, "alt": false}
 	var st := _seat_state(s)
 	var x: float = st["move"].x
 	var step := 0
@@ -592,11 +601,23 @@ func nav(index: int) -> Dictionary:
 			step = dir
 			s.nav_repeat = 0.4 if s.nav_x != dir else 0.15
 			s.nav_x = dir
+	var y: float = st["move"].y
+	var step_y := 0
+	if absf(y) < 0.3:
+		s.nav_y = 0
+	elif absf(y) > 0.6:
+		var dir := 1 if y > 0.0 else -1
+		if s.nav_y != dir or s.nav_repeat_y <= 0.0:
+			step_y = dir
+			s.nav_repeat_y = 0.4 if s.nav_y != dir else 0.15
+			s.nav_y = dir
 	var menu: bool = st["menu"] and not s.nav_menu
 	s.nav_menu = st["menu"]
 	var ok: bool = st["dash"] and not s.nav_ok
 	s.nav_ok = st["dash"]
-	return {"x": step, "menu": menu, "ok": ok}
+	var alt: bool = st["special"] and not s.nav_alt
+	s.nav_alt = st["special"]
+	return {"x": step, "y": step_y, "menu": menu, "ok": ok, "alt": alt}
 
 
 ## While a seat's menu is open (online, where the game doesn't pause), its
@@ -673,8 +694,12 @@ func _seat_state(s: Seat) -> Dictionary:
 		var st := _unit_state(u[0], u[1])
 		out["move"] += st["move"]
 		out["aim"] += st["aim"]
+		var active: bool = st["move"].length() > 0.5 or st["aim"] != Vector2.ZERO
 		for a in ACTIONS:
 			out[a] = out[a] or st[a]
+			active = active or st[a]
+		if active:
+			s.last_unit = u
 	out["move"] = out["move"].limit_length(1.0)
 	out["aim"] = out["aim"].limit_length(1.0)
 	return out
@@ -778,17 +803,29 @@ func free_controllers() -> Array[String]:
 	return out
 
 
-## What to call each control for this seat, for on-screen hints.
+## What to call each control for this seat, in words (see Glyphs for pictures).
 func button_names(index: int) -> Dictionary:
-	var s := seat(index)
-	if s == null or not uses_controller(index):
+	if not uses_controller(index):
 		return {"attack": "J", "special": "K", "dash": "Space", "interact": "E", "gag": "I"}
-	var sideways := s.kind == Kind.JOYCON_L or s.kind == Kind.JOYCON_R or s.side != ""
 	return {"attack": "Left", "special": "Top", "dash": "Bottom", "interact": "Right",
-		"gag": "SL/SR" if sideways else "L/R"}
+		"gag": "SL/SR" if sideways(index) else "L/R"}
 
 
-## True when this seat plays on a controller (so hints should name buttons, not keys).
+## True when this seat plays on a controller (so hints should show buttons, not
+## keys). Seat 0 alone uses whatever it last touched.
 func uses_controller(index: int) -> bool:
 	var s := seat(index)
-	return s != null and (s.device >= 0 or s.lost)
+	if s == null:
+		return false
+	return s.device >= 0 or s.lost or (s.device != KEYBOARD and s.last_unit[0] >= 0 and _devices.has(s.last_unit[0]))
+
+
+## Is this seat's controller a Joy-Con held sideways (SL and SR on top)?
+func sideways(index: int) -> bool:
+	var s := seat(index)
+	if s == null:
+		return false
+	if s.device >= 0 or s.lost:
+		return s.kind == Kind.JOYCON_L or s.kind == Kind.JOYCON_R or s.side != ""
+	var d: int = s.last_unit[0]
+	return d >= 0 and (_kind(d) == Kind.JOYCON_L or _kind(d) == Kind.JOYCON_R)

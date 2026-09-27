@@ -146,6 +146,32 @@ func _run() -> void:
 		p0.life = 0.01
 		await frames(3)
 		check(arena.pickups.is_empty(), "...and pop if nobody takes them")
+	# Only the kinds the host switched on (in the lobby's powerups menu) turn up.
+	Net.set_powerup(Pickups.Kind.ZOOMIES, false)
+	Net.set_powerup(Pickups.Kind.BUBBLE_WRAP, false)
+	Net.set_powerup(Pickups.Kind.TREAT, false)
+	Net.set_powerup(Pickups.Kind.WEAPON, false)
+	var seen := {}
+	for k in 12:
+		arena.pickups_on = true
+		arena._pickup_t = 0.0
+		await frames(2)
+		arena.pickups_on = false
+		for pu: Pickup in arena.pickups.values():
+			seen[pu.kind] = true
+			arena._cl_pickup_remove(pu.pickup_id)
+		await frames(1)
+	check(seen.keys() == [Pickups.Kind.SNACK], "with only Snacks switched on, only snacks turn up (%s)" % [seen.keys()])
+	Net.set_powerup(Pickups.Kind.SNACK, false)
+	arena.pickups_on = true
+	arena._pickup_t = 0.0
+	await frames(2)
+	arena.pickups_on = false
+	check(arena.pickups.is_empty(), "with every war powerup switched off, none turn up")
+	for kind: int in Pickups.MENU:
+		Net.set_powerup(kind, true)
+	check(Net.powerups.size() == Pickups.MENU.size() and Pickups.about(Pickups.Kind.TOOL) != "",
+		"all back on (and every one of them says what it does)")
 	# A bot goes and gets one close by.
 	var pepper: Player = cast["pepper"]
 	_place(pepper, 11.0, 11.0)

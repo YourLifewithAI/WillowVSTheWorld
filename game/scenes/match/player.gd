@@ -190,6 +190,8 @@ var _pounce_ambush := false
 var _pointer: Dictionary = {}
 var _pointer_t := 0.0
 var _all_done := false
+## Cleanup, on this screen: standing by a job that holding interact would work.
+var _job_here := false
 
 
 func setup(p_id: int, info: Dictionary, p_arena: Match) -> void:
@@ -334,7 +336,7 @@ func _owner_tick(delta: float) -> void:
 		if gag_charge >= 1.0 and not was_ready and is_local():
 			if arena.shared_screen():
 				sound("gag_ready")
-				Fx.text(arena.level.entities, position + Vector2(0, -sprite_height() - z - 10), "GAG READY!", marker_color())
+				Fx.text(arena.level.entities, position + Vector2(0, -sprite_height() - z - 10), "SUPER READY!", marker_color())
 			else:
 				Audio.play("gag_ready")
 
@@ -1358,12 +1360,17 @@ func _process(delta: float) -> void:
 func _update_pointer(delta: float) -> void:
 	if arena.phase != Match.Phase.CLEANUP or not is_local():
 		_pointer = {}
+		_job_here = false
 		return
 	_pointer_t -= delta
 	if _pointer_t > 0.0:
 		return
 	_pointer_t = 0.25
 	_pointer = arena.pointer_for(self)
+	var job := arena.job_here(self)
+	# (Driving or running over your own chore needs no button.)
+	_job_here = job != null and not (arena.has_owner_move(self) and arena.chore_of(job) == arena.my_chore(self)
+		and arena.my_chore(self) != Chores.Chore.STAIN)
 	# Done once nothing of this chore is left, not even steps still to come.
 	var mine := arena.my_chore(self)
 	var done: bool = mine != Chores.Chore.NONE and int(arena.chore_totals().get(mine, [0, 0.0])[0]) == 0
@@ -1517,6 +1524,20 @@ func _draw_you_marker(tip: Vector2) -> void:
 		_overlay.draw_string(font, at, label, HORIZONTAL_ALIGNMENT_LEFT, -1, 7, col)
 
 
+## A button picture and a word beside your head ("hold" by a job, "pass"
+## carrying the remote), for the button that does it on your controller.
+## `at` is the left edge, centred on the picture.
+func _draw_prompt(at: Vector2, word: String) -> void:
+	var font := ThemeDB.fallback_font
+	var g := Glyphs.of(seat, "interact")
+	var accent := marker_color() if arena.shared_screen() else Color("ffd84d")
+	var bob := Vector2(0, roundf(sin(_anim_t * 4.0)))
+	var gw := Glyphs.draw(_overlay, at + bob, g, 11.0, accent, font)
+	var base := at + bob + Vector2(gw + 2.0, 3.0)
+	_overlay.draw_string_outline(font, base, word, HORIZONTAL_ALIGNMENT_LEFT, -1, 7, 3, Glyphs.INK)
+	_overlay.draw_string(font, base, word, HORIZONTAL_ALIGNMENT_LEFT, -1, 7, Color.WHITE)
+
+
 func _draw_overlay() -> void:
 	if is_ko:
 		var zz := Vector2(4, -14 - sin(_anim_t * 3.0) * 2.0)
@@ -1536,6 +1557,8 @@ func _draw_overlay() -> void:
 	if arena.phase != Match.Phase.WAR and arena.phase != Match.Phase.COUNTDOWN:
 		if is_local():
 			_draw_you_marker(head + Vector2(0, sin(_anim_t * 5.0)))
+			if _job_here and not interacting:
+				_draw_prompt(head + Vector2(8, 5), "hold")
 		return
 	# Health pip bar.
 	var w := 14.0
@@ -1546,6 +1569,8 @@ func _draw_overlay() -> void:
 	_overlay.draw_rect(Rect2(bar.position, Vector2(round(w * frac), 2)), hp_col)
 	if is_local():
 		_draw_you_marker(head + Vector2(0, -4 + sin(_anim_t * 5.0)))
+		if carrying and arena.phase == Match.Phase.WAR:
+			_draw_prompt(head + Vector2(10, 4), "pass")
 	if _revealed:
 		# A little eye: someone's nose or x-ray vision has spotted you.
 		var eye := head + Vector2(0, -7)

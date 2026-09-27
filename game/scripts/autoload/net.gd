@@ -28,6 +28,8 @@ var local_name := "Player"
 var local_char := "willow"
 ## Which home the host picked (see Maps).
 var map_id := Maps.DEFAULT
+## Which powerups can turn up (see Pickups.MENU): the host picks, in the lobby.
+var powerups: Array = Pickups.MENU.duplicate()
 var in_match := false
 var online := false
 ## True once a --practice/--host/--join launch option has been used, so
@@ -315,7 +317,7 @@ func can_start() -> bool:
 func start_match() -> void:
 	if not can_start():
 		return
-	_cl_begin_match.rpc(roster, map_id)
+	_cl_begin_match.rpc(roster, map_id, powerups)
 
 
 func return_to_lobby() -> void:
@@ -344,6 +346,17 @@ func _srv_register(info: Dictionary) -> void:
 	_maybe_autostart()
 
 
+## Host only: let a kind of powerup turn up, or not.
+func set_powerup(kind: int, on: bool) -> void:
+	if not is_host() or not kind in Pickups.MENU or (kind in powerups) == on:
+		return
+	if on:
+		powerups.append(kind)
+	else:
+		powerups.erase(kind)
+	_broadcast_roster()
+
+
 ## Host only: pick the home to fight in.
 func set_map(id: String) -> void:
 	if is_host() and Maps.exists(id):
@@ -352,22 +365,24 @@ func set_map(id: String) -> void:
 
 
 func _broadcast_roster() -> void:
-	_cl_roster.rpc(roster, map_id)
+	_cl_roster.rpc(roster, map_id, powerups)
 
 
 @rpc("authority", "call_local", "reliable")
-func _cl_roster(new_roster: Dictionary, new_map: String) -> void:
+func _cl_roster(new_roster: Dictionary, new_map: String, new_powerups: Array) -> void:
 	roster = new_roster
 	map_id = new_map
+	powerups = new_powerups
 	roster_changed.emit()
 
 
 @rpc("authority", "call_local", "reliable")
-func _cl_begin_match(final_roster: Dictionary, final_map: String) -> void:
+func _cl_begin_match(final_roster: Dictionary, final_map: String, final_powerups: Array) -> void:
 	get_tree().paused = false
 	Seats.unmute_all()
 	roster = final_roster
 	map_id = final_map
+	powerups = final_powerups
 	in_match = true
 	get_tree().change_scene_to_file(MATCH_SCENE)
 
@@ -399,7 +414,7 @@ func _on_peer_connected(id: int) -> void:
 			# No late joining yet: politely hang up on them.
 			(multiplayer.multiplayer_peer as ENetMultiplayerPeer).disconnect_peer(id)
 			return
-		_cl_roster.rpc_id(id, roster, map_id)
+		_cl_roster.rpc_id(id, roster, map_id, powerups)
 
 
 func _on_peer_disconnected(id: int) -> void:

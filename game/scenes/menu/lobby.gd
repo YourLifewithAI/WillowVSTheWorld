@@ -2,10 +2,10 @@ extends Control
 ## Pick your side, pick your character, wait for friends, start.
 ##
 ## Friends on the same screen join on their own controller (see Seats for the
-## gestures). Each seat then flips through the characters with its stick, and
-## anyone's + or - starts a 3-second countdown (+ or - again cancels it).
-## Controllers never move the menu's focus; the keyboard and mouse work the
-## menu as usual.
+## gestures). Each seat then flips through the characters with its stick, the
+## top button opens the powerups menu (see PowerupsPanel), and anyone's + or -
+## starts a 3-second countdown (+ or - again cancels it). Controllers never
+## move the menu's focus; the keyboard and mouse work the menu as usual.
 
 const COUNTDOWN := 3.0
 
@@ -21,6 +21,8 @@ var _badges: Dictionary = {}  # character id -> HBoxContainer of seat tags
 var _notice: Label
 var _free: Label
 var _countdown := -1.0
+var _powerups_button: Button
+var _powerups: PowerupsPanel
 
 
 func _ready() -> void:
@@ -56,6 +58,14 @@ func _process(delta: float) -> void:
 		if not st.has_controller() and not (st.device == Seats.KEYBOARD and st.index != 0):
 			continue
 		var n := Seats.nav(st.index)
+		if is_instance_valid(_powerups):
+			# The powerups menu is open: it's for whoever opened it.
+			if st.index == _powerups.seat:
+				_powerups.nav_input(n)
+			continue
+		if n["alt"]:
+			_open_powerups(st.index)
+			continue
 		if n["x"] != 0:
 			Seats.cycle_character(st.index, n["x"])
 			_show_detail(Seats.char_of(st.index))
@@ -79,6 +89,20 @@ func _try_start() -> void:
 		_on_notice("Starting in 3...  (+ or - to wait)", Color("3a9f6a"))
 	else:
 		_on_notice("Each side needs at least one player: pick someone from the other team, or add a bot.", Color("e05a5a"))
+
+
+## The powerups menu, for a controller's seat (or -1: the mouse and keyboard).
+func _open_powerups(for_seat: int) -> void:
+	if is_instance_valid(_powerups):
+		return
+	_countdown = -1.0
+	_powerups = PowerupsPanel.new()
+	_powerups.seat = for_seat
+	_powerups.closed.connect(func() -> void:
+		if _char_buttons.has(Net.local_char) and Seats.keyboard_seat() <= 0:
+			_char_buttons[Net.local_char].grab_focus())
+	add_child(_powerups)
+	Audio.play("select", -4.0)
 
 
 func _on_notice(text: String, color: Color) -> void:
@@ -151,6 +175,10 @@ func _build() -> void:
 		clear.pressed.connect(Net.remove_bots)
 		bot_row.add_child(clear)
 		lcol.add_child(bot_row)
+	_powerups_button = Button.new()
+	_powerups_button.add_theme_font_size_override("font_size", 8)
+	_powerups_button.pressed.connect(_open_powerups.bind(-1))
+	lcol.add_child(_powerups_button)
 	var btn_row := HBoxContainer.new()
 	lcol.add_child(btn_row)
 	var leave := Button.new()
@@ -258,7 +286,7 @@ func _show_detail(id: String) -> void:
 	var chore := Chores.owned_by(id)
 	var walls := " (Big Bone)" if id == "pepper" else ""
 	var breaker := "" if not (id in ["biscuit", "butler", "claw", "pepper"]) else "   ·   Breaks walls%s" % walls
-	_detail.text = "%s the %s (%s): %s\nWeapon: %s   ·   Up close: %s   ·   Special: %s   ·   HP %d   ·   Speed %d%s\nGag: %s. %s\n+ %s\n- %s\nCleanup: %s %s." % [
+	_detail.text = "%s the %s (%s): %s\nWeapon: %s   ·   Up close: %s   ·   Special: %s   ·   HP %d   ·   Speed %d%s\nSuper: %s. %s\n+ %s\n- %s\nCleanup: %s %s." % [
 		c["name"], c["species"], c["role"], c["blurb"],
 		c["weapon"]["name"], m["name"], sp["name"], c["hp"], c["speed"], breaker,
 		g["name"], g["blurb"], c["strength"], c["weakness"], Chores.VERB.get(chore, ""),
@@ -329,6 +357,10 @@ func _refresh() -> void:
 			var picked := Seats.char_of(st.index)
 			if _badges.has(picked):
 				_badges[picked].add_child(UiTheme.label(Seats.tag(st.index), 8, Seats.color(st.index), true))
+	_powerups_button.text = "Powerups: %d of %d on%s" % [Net.powerups.size(), Pickups.MENU.size(),
+		"  (change)" if Net.is_host() else "  (see)"]
+	if is_instance_valid(_powerups):
+		_powerups.refresh()
 	var map: Dictionary = Maps.get_map(Net.map_id)
 	if _map_pick:
 		_map_pick.select(Maps.ORDER.find(Net.map_id))

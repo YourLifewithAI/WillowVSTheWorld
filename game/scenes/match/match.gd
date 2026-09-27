@@ -1250,6 +1250,12 @@ func in_reach(p: Player, job: Object) -> bool:
 	return (job as Furniture).distance_to(p.position) <= FIX_RADIUS
 
 
+## The job someone holding interact right here would work on (or null): for
+## the "hold" prompt over their head.
+func job_here(p: Player) -> Object:
+	return _job_for(p)
+
+
 ## Does this owner clean their chore their own way (driving over it, running
 ## into it, THUMPing), rather than holding interact at each job?
 func has_owner_move(p: Player) -> bool:
@@ -2108,7 +2114,9 @@ func _tick_pickups(delta: float) -> void:
 	_pickup_t = randf_range(every.x, every.y)
 	if pickups.size() >= (Pickups.WAR_MAX if war else Pickups.CLEANUP_MAX):
 		return
-	var kind := Pickups.roll(Pickups.WAR_ODDS if war else Pickups.CLEANUP_ODDS)
+	var kind := Pickups.roll(Pickups.allowed(Pickups.WAR_ODDS if war else Pickups.CLEANUP_ODDS, Net.powerups))
+	if kind < 0:
+		return  # the host switched off every kind for this part of the match
 	var arg := ""
 	var at := Vector2.INF
 	match kind:
@@ -2119,6 +2127,8 @@ func _tick_pickups(delta: float) -> void:
 			# For the chore with the most left to do, near one of its jobs.
 			var job = _tool_job()
 			if job == null:
+				if not Pickups.Kind.SKATES in Net.powerups:
+					return
 				kind = Pickups.Kind.SKATES
 			else:
 				arg = str(chore_of(job))

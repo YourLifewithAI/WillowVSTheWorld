@@ -11,8 +11,11 @@ extends CanvasLayer
 ## session: a menu opened from a controller offers "Keep playing" and "Back to
 ## lobby".
 
-const KEY_HINT := "Move: WASD   Attack: J   Special: K   Up close (or throw the remote): E   Gag: I   Dash: Space"
-const PAD_HINT := "Stick: move   Bottom: dash   Left: attack   Top: special   Right: up close (or throw the remote)   SL/SR: gag   + or -: menu"
+## The controls, with pictures of the buttons (see HintLine), for whoever's
+## on a controller (or the keyboard when nobody is).
+const WAR_HINT := "{move} Move   {attack} Fire (hold to aim)   {special} Special   {interact} Up close / pass the remote   {dash} Dash   {gag} Super   {menu} Menu"
+const KEY_WAR_HINT := "{move} Move   {aim} Aim   {attack} Fire (hold to aim)   {special} Special   {interact} Up close / pass   {dash} Dash   {gag} Super   {menu} Menu"
+const CLEANUP_HINT := "Your face = your job   ·   Grey hand = anyone's   ·   Two dots = two helpers   ·   Hold {interact} to help"
 
 var arena: Match
 
@@ -29,7 +32,7 @@ var _banner: VBoxContainer
 var _banner_title: Label
 var _banner_sub: Label
 var _banner_tween: Tween
-var _hint: Label
+var _hint: HintLine
 var _results: Control
 var _pause: Control
 var _pause_buttons: Array[Button] = []
@@ -58,11 +61,13 @@ func setup(match_node: Match) -> void:
 	_build_cards()
 	_build_feed()
 	_build_banner()
-	_hint = UiTheme.label("", 8, Color.WHITE, true)
-	_hint.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
-	_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_hint.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	_hint.position.y -= 14 if not arena.shared_screen() else 58
+	_hint = HintLine.new(_hint_seat(), "", 7)
+	_hint.centered = true
+	_hint.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
+	_hint.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	_hint.offset_top = -12.0
+	_hint.offset_bottom = 0.0
+	_hint.position.y -= 8 if not arena.shared_screen() else 52
 	_root.add_child(_hint)
 	on_phase_changed()
 
@@ -198,7 +203,7 @@ func _build_card(parent: Control, p: Player, width: float, shared: bool) -> Dict
 	var c := {"player": p}
 	c["hp"] = UiTheme.bar(Color("8ff0a4"), width, 4 if shared else 5)
 	col.add_child(c["hp"])
-	c["special_label"] = _status_label("", width, small, Color("ffe9c7"))
+	c["special_label"] = _status_line(p, width, small, Color("ffe9c7"), border)
 	col.add_child(c["special_label"])
 	var bars := HBoxContainer.new()
 	bars.add_theme_constant_override("separation", 3)
@@ -207,11 +212,20 @@ func _build_card(parent: Control, p: Player, width: float, shared: bool) -> Dict
 	c["dash_bar"] = UiTheme.bar(Color("9fd8ff"), roundf(width * 0.3) - 3, 3)
 	bars.add_child(c["special_bar"])
 	bars.add_child(c["dash_bar"])
-	c["gag_label"] = _status_label("", width, small, Color("e0b8ff"))
+	c["gag_label"] = _status_line(p, width, small, Color("e0b8ff"), border)
 	col.add_child(c["gag_label"])
 	c["gag_bar"] = UiTheme.bar(Color("c78cff"), width, 3)
 	col.add_child(c["gag_bar"])
 	return c
+
+
+## A one-line status with button pictures in it, trimmed to the card's width.
+func _status_line(p: Player, width: float, size: int, color: Color, accent: Color) -> HintLine:
+	var l := HintLine.new(p.seat, "", size, color)
+	l.fixed_width = width
+	l.outline = false
+	l.accent = accent.lightened(0.3)
+	return l
 
 
 ## A one-line label that trims itself rather than stretching the card.
@@ -291,17 +305,29 @@ func on_phase_changed() -> void:
 			_hint.text = ""
 		Match.Phase.COUNTDOWN:
 			_phase.text = "GET READY"
-			_hint.text = PAD_HINT if _pads_on_screen() else KEY_HINT
+			_hint.text = _war_hint()
 		Match.Phase.WAR:
 			_phase.text = "WAR FOR THE REMOTE"
-			_hint.text = PAD_HINT if _pads_on_screen() else KEY_HINT
+			_hint.text = _war_hint()
 		Match.Phase.WHISTLE:
 			_phase.text = "TRUCE!"
 			_hint.text = ""
 		Match.Phase.CLEANUP:
 			_phase.text = "CLEAN UP BEFORE THEY'RE IN"
-			_hint.text = "Your face = your job   ·   Grey hand = anyone's   ·   Two dots = two helpers   ·   Hold %s to help" % (
-				"right" if _pads_on_screen() else "E")
+			_hint.text = CLEANUP_HINT
+
+
+func _war_hint() -> String:
+	return WAR_HINT if Seats.uses_controller(_hint_seat()) else KEY_WAR_HINT
+
+
+## Whose buttons the hint along the bottom shows: the first person on this
+## screen playing on a controller, else whoever has the keyboard.
+func _hint_seat() -> int:
+	for p in arena.local_players():
+		if Seats.uses_controller(p.seat):
+			return p.seat
+	return maxi(0, Seats.keyboard_seat())
 
 
 ## Who owns which chore changed (the whistle, or someone wandered off).
@@ -331,6 +357,10 @@ func _process(_delta: float) -> void:
 		_clock.text = "Home!"
 	for c in _cards:
 		_update_card(c)
+	if _hint.text != "":
+		_hint.seat = _hint_seat()
+		if arena.phase == Match.Phase.WAR or arena.phase == Match.Phase.COUNTDOWN:
+			_hint.text = _war_hint()
 	_poll_menus()
 
 
@@ -338,28 +368,27 @@ func _update_card(c: Dictionary) -> void:
 	var me: Player = c["player"]
 	if not is_instance_valid(me):
 		return
-	var keys := Seats.button_names(me.seat)
 	c["hp"].value = float(me.hp) / float(me.max_hp)
 	var sp: Dictionary = me.data["special"]
 	c["special_bar"].value = 1.0 - me.special_cd / float(sp["cooldown"])
 	c["dash_bar"].value = 1.0 - me.dash_cd / Player.DASH_COOLDOWN
 	c["gag_bar"].value = me.gag_charge
-	var gag_label: Label = c["gag_label"]
+	var gag_label: HintLine = c["gag_label"]
 	var gag_name: String = me.data["gag"]["name"]
 	if arena.phase == Match.Phase.CLEANUP or arena.phase == Match.Phase.WHISTLE:
 		# How to do the chore this character got (a spare hand's isn't its usual one).
-		gag_label.text = Chores.how(arena.my_chore(me), arena.has_owner_move(me)).replace("{interact}", keys["interact"])
+		gag_label.text = Chores.how(arena.my_chore(me), arena.has_owner_move(me))
 		gag_label.modulate.a = 1.0
 	elif me.gag_t > 0.0:
 		gag_label.text = "%s!" % gag_name.to_upper()
 	elif me.gag_charge >= 1.0:
-		gag_label.text = "%s: %s READY!" % [keys["gag"], gag_name.to_upper()]
+		gag_label.text = "{gag} %s READY!" % gag_name.to_upper()
 		gag_label.modulate.a = 0.6 + 0.4 * sin(Time.get_ticks_msec() / 120.0)
 	else:
-		gag_label.text = "%s: %s  %d%%" % [keys["gag"], gag_name, roundi(me.gag_charge * 100.0)]
+		gag_label.text = "{gag} %s  %d%%" % [gag_name, roundi(me.gag_charge * 100.0)]
 		gag_label.modulate.a = 1.0
 	var ready := "ready!" if me.special_cd <= 0.0 else "%.1fs" % me.special_cd
-	var label: Label = c["special_label"]
+	var label: HintLine = c["special_label"]
 	if Seats.seat(me.seat) and Seats.seat(me.seat).lost:
 		label.text = "Controller lost! Press any button on it"
 	elif me.captured_by != 0:
@@ -370,7 +399,7 @@ func _update_card(c: Dictionary) -> void:
 		var mine := arena.my_chore(me)
 		var left: int = arena.chore_totals().get(mine, [0, 0.0])[0]
 		if mine == Chores.Chore.NONE:
-			label.text = "Help out! Hold %s by anything" % keys["interact"]
+			label.text = "Help out! Hold {interact} by anything"
 		elif left > 0:
 			label.text = "%s%s  %d left" % ["TURBO! " if me.turbo_t > 0.0 and me.turbo_chore == mine else "", Chores.VERB.get(mine, ""), left]
 		else:
@@ -378,7 +407,7 @@ func _update_card(c: Dictionary) -> void:
 	elif me.is_ko:
 		label.text = "KO'd! Back in a moment..."
 	elif me.carrying:
-		label.text = "Carrying the remote! %s: pass it  (no dashing)" % keys["interact"]
+		label.text = "Carrying the remote! {interact} pass it"
 	elif me.pickup_status() != "":
 		label.text = me.pickup_status()
 	elif me.hiding:
@@ -386,7 +415,7 @@ func _update_card(c: Dictionary) -> void:
 	elif me.stealthed:
 		label.text = "Invisible! Your next hit does double damage."
 	else:
-		label.text = "%s: %s  %s" % [keys["special"], sp["name"], ready]
+		label.text = "{special} %s  %s" % [sp["name"], ready]
 
 
 ## Controllers can't move the menus' focus, so each seat's + / - opens the
