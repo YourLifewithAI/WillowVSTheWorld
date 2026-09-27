@@ -53,6 +53,7 @@ func _run() -> void:
 	while Match.current == null or Match.current.phase != Match.Phase.WAR:
 		await frames(10)
 	arena = Match.current
+	arena.pickups_on = false  # nothing random turning up mid-test
 	for p: Player in arena.players.values():
 		p.brain = Controls.new()  # Nobody moves on their own.
 		if p.team == Roster.Team.PETS:

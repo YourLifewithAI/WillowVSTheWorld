@@ -64,6 +64,11 @@ for MAP in $MAPS; do
   else
     fail "$MAP: no per-chore cleanup log"
   fi
+  if grep -q "\] pickup " "$LOG"; then
+    pass "$MAP: things popped up and got picked up ($(grep -c '\] pickup ' "$LOG"))"
+  else
+    fail "$MAP: no pickups picked up"
+  fi
   for cue in "parents_leave" "whistle" "car_horn" "music war" "music cleanup"; do
     grep -q "\[audio\] $cue\$" "$LOG" || MISSED_CUE="$cue"
   done
@@ -76,7 +81,7 @@ for MAP in $MAPS; do
 done
 
 echo "== Shared screen: four people on fake Joy-Cons and a controller"
-"$GODOT" --headless --fixed-fps 60 --path "$GAME" res://tests/couch_test.tscn -- --war=60 --cleanup=5 \
+"$GODOT" --headless --fixed-fps 60 --path "$GAME" res://tests/couch_test.tscn -- --war=60 --cleanup=5 --pickups=0 \
   > "$OUT/couch.log" 2>&1
 no_script_errors "$OUT/couch.log" "couch"
 grep -E "^  (PASS|FAIL)  couch:" "$OUT/couch.log"
@@ -99,6 +104,15 @@ echo "== Cleanup by specialty: who owns what, work rates, repair steps, each cha
 no_script_errors "$OUT/chores.log" "chores"
 grep -E "^  (PASS|FAIL)  chores:" "$OUT/chores.log"
 if grep -q "FAIL  chores:" "$OUT/chores.log" || ! grep -q "^\[chores\] [0-9]* passed, 0 failed" "$OUT/chores.log"; then
+  FAILED=1
+fi
+
+echo "== Pickups: power-ups, borrowed weapons, turbo tools"
+"$GODOT" --headless --fixed-fps 60 --path "$GAME" res://tests/pickups_test.tscn -- --war=300 \
+  > "$OUT/pickups.log" 2>&1
+no_script_errors "$OUT/pickups.log" "pickups"
+grep -E "^  (PASS|FAIL)  pickups:" "$OUT/pickups.log"
+if grep -q "FAIL  pickups:" "$OUT/pickups.log" || ! grep -q "^\[pickups\] [0-9]* passed, 0 failed" "$OUT/pickups.log"; then
   FAILED=1
 fi
 

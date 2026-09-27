@@ -145,6 +145,33 @@ The pets are sneaky, the robots have sensors.
   teammates look ghostly, revealed enemies are drawn normally. Bots play by the same
   rule: they can't target what their team can't see.
 
+### Pickups
+
+Every 14-20 s a bubble pops up somewhere open on the floor (never on a base or
+the rug, at most three at once, gone after 20 s). Whoever walks over it first
+gets what's inside (numbers in `game/scripts/core/pickups.gd`):
+
+| Pickup | What it does |
+|---|---|
+| **The Zoomies** (lightning bolt) | 40% faster for 8 s |
+| **Bubble Wrap** | soaks up the next 40 damage (for up to 12 s) |
+| **A Snack** (fish cracker) | +50 health |
+| **A Treat** (star) | your gag is ready right now |
+| **Someone else's weapon** | 12 s with another character's laser, bazooka, gatling, dust cannon, toaster or wrecking ball (the host checks the hits like any other; nobody picks up their own) |
+
+Bots grab anything good that turns up near them, unless someone's on top of them.
+The whistle clears whatever is left on the floor, and everyone's power-ups end.
+
+In the **cleanup**, a bubble turns up every 8-11 s (two at most). Most are **turbo
+tools**, each with one chore owner's face on it, turning up next to that chore's
+jobs (the chores with the most left to do are likelier): the Turbo Bag, the Catnip,
+the Bass Booster, the Squeaky Ball, the Warm Blanket, the Duct Tape, the Winch,
+the Step Ladder. **Only that chore's owner can pick it up** (or anyone, if nobody
+owns that chore right now): for 12 s they work their chore 1.75x as fast, and
+their own move (vacuum, swat, fetch, THUMP) reaches 1.5x as far. So a tool makes
+a specialist better at their job; it never lets someone else do it. The rest are
+**roller skates**, 30% faster for anyone for 10 s.
+
 ### Wrecking the house
 
 This is the joke of the game: they basically destroy the house, then have to
@@ -235,9 +262,9 @@ with how many jobs are left; the biggest one pulses.
 The weights are set so that after a big war each chore is roughly an equal share
 of the house.
 
-**Calibration (bots only, full 3-minute wars, 8 players):** every character
-playing its role ends at 90-100% (spotless); one bot ignoring its role 73-96%
-(spotless about half the time); nobody playing to their strengths 43-52%
+**Calibration (bots only, full 3-minute wars, 8 players, pickups on):** every
+character playing its role ends at 93-100% (spotless); one bot ignoring its role
+72-96% (spotless a third of the time); nobody playing to their strengths 43-52%
 (grounded on every map). People will be slower
 than bots, so the cleanup times (per home, in `game/scripts/core/maps.gd`) need
 tuning against real playtests.

@@ -239,6 +239,7 @@ func _start(map: String, pets: Array, robots: Array) -> void:
 	while Match.current == null or Match.current.phase != Match.Phase.WAR:
 		await frames(10)
 	arena = Match.current
+	arena.pickups_on = false  # nothing random turning up mid-test
 	cast.clear()
 	for p: Player in arena.players.values():
 		p.brain = Controls.new()

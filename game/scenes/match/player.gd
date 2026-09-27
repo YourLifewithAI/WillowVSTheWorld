@@ -74,6 +74,15 @@ var dance_t := 0.0
 var gag_t := 0.0
 ## Host only: when this character was last seen hidden (validates ambushes).
 var last_stealth_time := -100.0
+## Picked up off the floor (see Pickups), mirrored on every machine: someone
+## else's weapon (their character id) and for how long, bubble wrap (damage it
+## will still soak up; the host decides), and a cleanup turbo tool's chore.
+var borrowed := ""
+var borrow_t := 0.0
+var shield := 0
+var shield_t := 0.0
+var turbo_chore := Chores.Chore.NONE
+var turbo_t := 0.0
 ## Host only: the cleanup job a bot has picked (it works that one when in reach,
 ## rather than whatever's nearest).
 var focus_job = null  # (untyped: floor mess may be freed under it)
@@ -131,6 +140,7 @@ var _stun_vis := 0.0
 var _flip_t := 0.0
 var _revealed := false
 var _showing_bone := false
+var _shown_weapon := ""
 var _hop_t := 0.0
 var _seen := true
 var _hop_h := 0.0
@@ -173,15 +183,9 @@ func _ready() -> void:
 	var s := _sprite.texture.get_size()
 	_sprite.offset = Vector2(-floor(s.x / 2.0), -s.y + 1)
 	_visual.add_child(_sprite)
-	var w: Dictionary = data["weapon"]
-	if w.has("sprite"):
-		_weapon = Sprite2D.new()
-		_weapon.texture = Roster.texture(w["sprite"])
-		if int(w["kind"]) == Roster.Weapon.MELEE:
-			# Hangs from its top (the wrecking ball's chain).
-			_weapon.centered = false
-			_weapon.offset = Vector2(-floor(_weapon.texture.get_width() / 2.0), 0)
-		_visual.add_child(_weapon)
+	# The weapon in hand (see _update_weapon): its own, the Big Bone, or one picked up.
+	_weapon = Sprite2D.new()
+	_visual.add_child(_weapon)
 	_overlay = Node2D.new()
 	_overlay.z_index = 30
 	_overlay.draw.connect(_draw_overlay)
@@ -352,7 +356,7 @@ func _owner_tick(delta: float) -> void:
 		_play_action.rpc(Action.DASH, facing)
 	if not at_war or carrying or _slam_t > 0.0:
 		return
-	var auto_fire: bool = inp.get("attack_held", false) and float(data["weapon"]["cooldown"]) < 0.2
+	var auto_fire: bool = inp.get("attack_held", false) and float(weapon_spec()["cooldown"]) < 0.2
 	if inp["interact_pressed"] and melee_cd <= 0.0:
 		_do_melee()
 	elif (inp["attack"] or auto_fire) and attack_cd <= 0.0:
@@ -430,12 +434,48 @@ func has_bone() -> bool:
 	return gag_t > 0.0 and int(data["gag"]["kind"]) == Roster.Gag.BONE
 
 
+## Holding a weapon picked up off the floor (someone else's)?
+func has_borrowed() -> bool:
+	return borrowed != "" and borrow_t > 0.0
+
+
 func weapon_spec() -> Dictionary:
-	return data["gag"] if has_bone() else data["weapon"]
+	if has_bone():
+		return data["gag"]
+	if has_borrowed():
+		return Roster.get_char(borrowed)["weapon"]
+	return data["weapon"]
+
+
+## Which ability (see ability_spec) the attack button uses right now.
+func weapon_ability() -> int:
+	if has_bone():
+		return 2
+	return 4 if has_borrowed() else 0
+
+
+## The weapon (0), special (1), gag (2), close-up move (3) or picked-up
+## weapon (4) of this character. A picked-up weapon stays known after it runs
+## out, so its last shots still land on every machine.
+func ability_spec(which: int) -> Dictionary:
+	if which == 4:
+		return Roster.get_char(borrowed)["weapon"] if borrowed != "" else data["weapon"]
+	return Roster.ability(data, which)
 
 
 func _weapon_is_melee() -> bool:
-	return has_bone() or int(data["weapon"]["kind"]) == Roster.Weapon.MELEE
+	return has_bone() or int(weapon_spec()["kind"]) == Roster.Weapon.MELEE
+
+
+## What the card says about something picked up, or "".
+func pickup_status() -> String:
+	if has_borrowed():
+		return "%s!  %ds" % [weapon_spec()["name"], ceili(borrow_t)]
+	if shield > 0:
+		return "Bubble wrap (%d)" % shield
+	if turbo_t > 0.0:
+		return "TURBO!  %ds" % ceili(turbo_t)
+	return ""
 
 
 func _do_attack() -> void:
@@ -445,9 +485,9 @@ func _do_attack() -> void:
 	_break_stealth(0.6)
 	_play_action.rpc(Action.ATTACK, facing)
 	if _weapon_is_melee():
-		_hit_arc(w, 2 if has_bone() else 0, ambush)
+		_hit_arc(w, weapon_ability(), ambush)
 	else:
-		_fire(0, w, ambush)
+		_fire(weapon_ability(), w, ambush)
 
 
 ## The right button (when you aren't carrying the remote): this character's
@@ -912,9 +952,9 @@ func heal(new_hp: int) -> void:
 	hp = new_hp
 
 
-func apply_buff(mult: float, duration: float, heal_to: int) -> void:
+func apply_buff(mult: float, duration: float, heal_to: int, label: String = "+HYPE") -> void:
 	hp = heal_to
-	Fx.text(arena.level.entities, position + Vector2(0, -sprite_height() - z - 4), "+HYPE", Color("62f2ff"))
+	Fx.text(arena.level.entities, position + Vector2(0, -sprite_height() - z - 4), label, Color("62f2ff"))
 	if is_multiplayer_authority():
 		buff_mult = mult
 		_buff_t = duration
@@ -930,6 +970,11 @@ func reset_for_phase() -> void:
 	capture_mode = Capture.NONE
 	dance_t = 0.0
 	gag_t = 0.0
+	borrowed = ""
+	borrow_t = 0.0
+	shield = 0
+	shield_t = 0.0
+	turbo_t = 0.0
 	if is_multiplayer_authority():
 		knock_vel = Vector2.ZERO
 		stun = 0.0
@@ -958,6 +1003,11 @@ func _process(delta: float) -> void:
 	_swing = move_toward(_swing, 0.0, delta * 4.0)
 	gag_t = maxf(0.0, gag_t - delta)
 	dance_t = maxf(0.0, dance_t - delta)
+	borrow_t = maxf(-1.0, borrow_t - delta)
+	turbo_t = maxf(0.0, turbo_t - delta)
+	shield_t = maxf(0.0, shield_t - delta)
+	if shield_t <= 0.0:
+		shield = 0
 	if absf(facing.x) > 0.2:
 		_face_left = facing.x < 0.0
 	_sprite.flip_h = _face_left
@@ -1057,18 +1107,24 @@ func _update_weapon() -> void:
 	if _weapon == null:
 		return
 	var w := weapon_spec()
-	if has_bone() != _showing_bone:
+	var shown := String(w.get("sprite", ""))
+	if shown != _shown_weapon or has_bone() != _showing_bone:
+		_shown_weapon = shown
 		_showing_bone = has_bone()
-		var tex := Roster.texture(w["sprite"])
+		var tex := Roster.texture(shown) if shown != "" else null
 		_weapon.texture = tex
-		_weapon.centered = not _weapon_is_melee()
-		if _showing_bone:
-			_weapon.offset = Vector2(-floor(tex.get_width() / 2.0), -tex.get_height() + 2)
-		elif _weapon_is_melee():
-			_weapon.offset = Vector2(-floor(tex.get_width() / 2.0), 0)
-		else:
-			_weapon.offset = Vector2.ZERO
-	_weapon.visible = not is_ko and _flip_t <= 0.0 and captured_by == 0
+		if tex:
+			_weapon.centered = not _weapon_is_melee()
+			if _showing_bone:
+				_weapon.offset = Vector2(-floor(tex.get_width() / 2.0), -tex.get_height() + 2)
+			elif _weapon_is_melee():
+				# Hangs from its top (the wrecking ball's chain).
+				_weapon.offset = Vector2(-floor(tex.get_width() / 2.0), 0)
+			else:
+				_weapon.offset = Vector2.ZERO
+	_weapon.visible = _weapon.texture != null and not is_ko and _flip_t <= 0.0 and captured_by == 0
+	if not _weapon.visible:
+		return
 	var hold: Vector2 = w["hold"]
 	var side := -1.0 if _face_left else 1.0
 	_weapon.flip_h = _face_left
@@ -1159,6 +1215,15 @@ func _draw_overlay() -> void:
 		_overlay.draw_string(ThemeDB.fallback_font, zz, "z", HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color.WHITE)
 		_overlay.draw_string(ThemeDB.fallback_font, zz + Vector2(4, -5), "z", HORIZONTAL_ALIGNMENT_LEFT, -1, 6, Color.WHITE)
 		return
+	# Bubble wrap round them; a turbo tool's sparkle circling them.
+	var mid := Vector2(0, round(-z) - sprite_height() * 0.5)
+	if shield > 0:
+		var r := maxf(9.0, sprite_height() * 0.6)
+		_overlay.draw_circle(mid, r, Color(0.62, 0.85, 1.0, 0.18))
+		_overlay.draw_arc(mid, r, 0.0, TAU, 20, Color(0.8, 0.93, 1.0, 0.75), 1.0)
+	if turbo_t > 0.0:
+		for k in 2:
+			_overlay.draw_circle(mid + Vector2.from_angle(_anim_t * 6.0 + PI * k) * 9.0, 1.2, Color("ffd84d"))
 	var head := Vector2(0, round(-z) - sprite_height() - 3)
 	if arena.phase != Match.Phase.WAR and arena.phase != Match.Phase.COUNTDOWN:
 		if is_local():

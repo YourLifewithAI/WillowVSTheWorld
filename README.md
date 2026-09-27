@@ -20,6 +20,11 @@ speed, so after a big war the house only gets spotless if everyone plays to thei
 strengths. The war's winners only get to watch their show if the house passes
 inspection. Otherwise everybody is grounded.
 
+Things pop up on the floor all the while: in the war, power-ups (the zoomies,
+bubble wrap, snacks, treats that charge your gag) and other characters' weapons;
+in the cleanup, turbo tools that only the chore's owner can pick up, and roller
+skates.
+
 | Pick a side | Clean up together |
 |---|---|
 | ![Lobby: pick Team Pets or Team Robots](docs/images/lobby.png) | ![Cleanup phase with the tidiness meter](docs/images/cleanup.png) |
@@ -212,7 +217,8 @@ tools/smoke_test.sh path/to/godot
 Runs headless (no window): imports the project, checks that every sound the game
 asks for exists, plays a full 3v3 bot match on every home at top speed (checking the
 phase sounds and music fire), checks the walls' rules (`tests/walls_test.gd`) and the cleanup's (`tests/chores_test.gd`: who owns
-what, work rates, the two-helper rule, repair steps and each character's own way of cleaning), then plays a real host + client network match over
+what, work rates, the two-helper rule, repair steps and each character's own way of cleaning) and the pickups
+(`tests/pickups_test.gd`), then plays a real host + client network match over
 localhost and checks that both machines agree on the map and the result. Two
 scripted tests run too: `tests/couch_test.gd` (shared screen, with fake Joy-Cons) and
 `tests/melee_test.gd` (every character's close-up move, and what each one does). Takes
@@ -223,5 +229,6 @@ The game also takes launch options after `--`, which the tests use:
 `--practice`, `--host`, `--join=IP`, `--map=studio`, `--bots=N`, `--char=willow`, `--autostart=N`,
 `--autopilot`, `--war=SECONDS`, `--cleanup=SECONDS`, `--captures=N`, `--quit-after=SECONDS`,
 `--generic_bots=N` (the first N bots ignore their specialty, to measure how much it matters),
+`--pickups=0` (nothing pops up),
 `--screenshot=PATH@SECONDS`, `--mute`, `--audio-log` (prints every sound as it plays). For example, `godot --path game -- --practice --bots=5 --autostart=1`
 drops you straight into a 3v3 match.

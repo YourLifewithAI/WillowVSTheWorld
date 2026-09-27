@@ -106,6 +106,12 @@ var _chore_log: Dictionary = {}  # chore -> {"done", "owner", "other"} weight cl
 var work_clock := 0.0
 ## Host: which bot is heading for which job (see BotBrain._cleanup).
 var claims: Dictionary = {}
+## Things that popped up on the floor (see Pickups): id -> Pickup.
+var pickups: Dictionary = {}
+## Off for the scripted tests (--pickups=0), so nothing random turns up.
+var pickups_on := true
+var _next_pickup_id := 1
+var _pickup_t := Pickups.WAR_FIRST
 ## Walls each team has knocked through this war (host; bots stop at MAX_BREACHES).
 var breaches: Array[int] = [0, 0]
 var _load_timeout := 8.0
@@ -138,6 +144,7 @@ func _ready() -> void:
 		cleanup_time = float(Net.options["cleanup"])
 	if Net.options.has("captures"):
 		capture_limit = int(Net.options["captures"])
+	pickups_on = Net.options.get("pickups", "1") != "0"
 	_hang_pictures()
 	_spawn_players()
 	remote = TVRemote.new()
@@ -387,6 +394,7 @@ func _physics_process(delta: float) -> void:
 			_tick_ko(delta)
 			_tick_knockovers()
 			_tick_gags(delta)
+			_tick_pickups(delta)
 			_tick_navigation(delta)
 			if time_left <= 0.0 or scores.max() >= capture_limit:
 				_end_war()
@@ -396,6 +404,7 @@ func _physics_process(delta: float) -> void:
 		Phase.CLEANUP:
 			_tick_remote(delta)
 			_tick_jobs(delta)
+			_tick_pickups(delta)
 			_tick_navigation(delta)
 			if time_left <= 0.0 or mess_remaining() <= 0.0:
 				_finish()
@@ -418,6 +427,7 @@ func _end_war() -> void:
 	_vortices.clear()
 	_strikes.clear()
 	var winner := _winning_team()
+	_clear_pickups()
 	_assign_chores()
 	# The first cleanup of the evening gets a little longer to read the jobs.
 	_set_phase(Phase.WHISTLE, whistle_time + (2.0 if Net.matches_played == 0 else 0.0))
@@ -443,10 +453,12 @@ func _begin_cleanup() -> void:
 	for pid: int in players:
 		_last_work[pid] = now
 		_prev_pos[pid] = players[pid].position
+	_pickup_t = Pickups.CLEANUP_FIRST
 	_set_phase(Phase.CLEANUP, cleanup_time)
 
 
 func _finish() -> void:
+	_clear_pickups()
 	var left := chore_totals()
 	for c: int in Chores.Chore.values():
 		var done: Dictionary = _chore_log.get(c, {})
@@ -675,7 +687,7 @@ func _srv_throw(pid: int, dir: Vector2) -> void:
 
 func report_hit(attacker: Player, target: Player, ability: int, dir: Vector2, ambush: bool = false) -> void:
 	if ability != 2:
-		var dealt := float(Roster.ability(attacker.data, ability).get("damage", 0))
+		var dealt := float(attacker.ability_spec(ability).get("damage", 0))
 		attacker.gag_charge = minf(1.0, attacker.gag_charge + dealt * Player.GAG_PER_DAMAGE)
 	if multiplayer.is_server():
 		_srv_hit(attacker.pid, target.pid, ability, dir, ambush)
@@ -695,7 +707,9 @@ func _srv_hit(aid: int, tid: int, ability: int, dir: Vector2, ambush: bool) -> v
 		return
 	if Iso.fdist(a.position, t.position) > 400.0:
 		return
-	var spec := Roster.ability(a.data, ability)
+	if ability == 4 and not _borrow_ok(a):
+		return
+	var spec := a.ability_spec(ability)
 	var kind := int(spec.get("kind", -1))
 	# Flyers are out of reach of slams and suction.
 	if ability == 1 and t.data.get("flying", false) and (kind == Roster.Special.SLAM or kind == Roster.Special.PULL):
@@ -731,6 +745,12 @@ func _apply_hit(a: Player, t: Player, spec: Dictionary, d: Vector2, knock_scale:
 	var effect := String(spec.get("effect", ""))
 	if effect == "pull":
 		d = -d  # yanked toward the attacker
+	# Bubble wrap soaks it up first.
+	if t.shield > 0 and damage > 0.0:
+		var soak := mini(t.shield, roundi(damage))
+		t.shield -= soak
+		damage -= soak
+		_cl_shield.rpc(t.pid, t.shield)
 	t.hp = maxi(0, t.hp - roundi(damage))
 	if effect == "drain" and not a.is_ko:
 		var healed := mini(a.max_hp, a.hp + roundi(damage * float(spec.get("effect_value", 0.5))))
@@ -851,13 +871,13 @@ func _srv_special(pid: int) -> void:
 					continue
 				if Iso.fdist(ally.position, p.position) <= float(sp["radius"]):
 					ally.hp = mini(ally.max_hp, ally.hp + int(sp["heal"]))
-					_cl_buff.rpc(ally.pid, float(sp["speed_mult"]), float(sp["duration"]), ally.hp)
+					_cl_buff.rpc(ally.pid, float(sp["speed_mult"]), float(sp["duration"]), ally.hp, "+HYPE")
 
 
 @rpc("authority", "call_local", "reliable")
-func _cl_buff(pid: int, mult: float, duration: float, new_hp: int) -> void:
+func _cl_buff(pid: int, mult: float, duration: float, new_hp: int, label: String) -> void:
 	if players.has(pid):
-		players[pid].apply_buff(mult, duration, new_hp)
+		players[pid].apply_buff(mult, duration, new_hp, label)
 
 
 # ============================================================ mess & tidying
@@ -1262,6 +1282,16 @@ func weight_of(job: Object) -> float:
 	return f.step_weight(f.current_chore())
 
 
+## A turbo tool (see Pickups): faster at that one chore for a while.
+func _turbo(p: Player, c: int) -> float:
+	return Pickups.TURBO_RATE if p.turbo_t > 0.0 and p.turbo_chore == c else 1.0
+
+
+## ...and an owner's own move reaches further.
+func _reach(p: Player) -> float:
+	return Pickups.TURBO_REACH if _turbo(p, my_chore(p)) > 1.0 else 1.0
+
+
 ## Bass's Cleaning Playlist: everyone near him works a little faster.
 func _playlist(p: Player) -> float:
 	for q: Player in players.values():
@@ -1280,7 +1310,7 @@ func _work(job: Object, crew: Array, delta: float, send: bool) -> void:
 		var own := my_chore(p) == c
 		owner_on = owner_on or own
 		helpers += 0 if own else 1
-		rates[p.pid] = Chores.rate(own, c, chore_owners) * _playlist(p)
+		rates[p.pid] = Chores.rate(own, c, chore_owners) * _playlist(p) * _turbo(p, c)
 		rate += rates[p.pid]
 	# Heavy and high jobs need two pairs of helping hands while their owner's about.
 	if not owner_on and helpers < 2 and Chores.needs_two(c, chore_owners):
@@ -1402,7 +1432,7 @@ func _tick_owner_moves(delta: float) -> void:
 ## Zoomba hoovers up floor mess just by driving over it.
 func _vacuum(p: Player, from: Vector2) -> void:
 	for d: Debris in debris.values():
-		if d.chore == Chores.Chore.FLOOR and Iso.segment_fdist(d.position, from, p.position) <= Chores.VACUUM_RADIUS \
+		if d.chore == Chores.Chore.FLOOR and Iso.segment_fdist(d.position, from, p.position) <= Chores.VACUUM_RADIUS * _reach(p) \
 				and _reachable(p, d.position):
 			_clear_debris(d, How.VACUUM, p)
 
@@ -1413,14 +1443,14 @@ func _swat(p: Player, from: Vector2, delta: float) -> void:
 	if _swat_cd[p.pid] > 0.0:
 		return
 	var best: Debris = null
-	var best_d := Chores.SWAT_RADIUS
+	var best_d := Chores.SWAT_RADIUS * _reach(p)
 	for d: Debris in debris.values():
 		var dist := Iso.segment_fdist(d.position, from, p.position)
 		if d.chore == Chores.Chore.CLUTTER and dist <= best_d and _reachable(p, d.position):
 			best = d
 			best_d = dist
 	if best:
-		_swat_cd[p.pid] = Chores.SWAT_TIME
+		_swat_cd[p.pid] = Chores.SWAT_TIME / _reach(p)
 		_clear_debris(best, How.SWAT, p)
 
 
@@ -1445,7 +1475,7 @@ func _fetch(p: Player, from: Vector2) -> void:
 			continue
 		if item == dropped[0] and work_clock - float(dropped[1]) < 1.5:
 			continue  # he's only just put it down
-		if Iso.segment_fdist(item.position, from, p.position) > Chores.FETCH_RADIUS or not _reachable(p, item.position):
+		if Iso.segment_fdist(item.position, from, p.position) > Chores.FETCH_RADIUS * _reach(p) or not _reachable(p, item.position):
 			continue
 		if item.stray():
 			_carried[p.pid] = item
@@ -1472,12 +1502,12 @@ func _thump(p: Player, delta: float) -> void:
 		return
 	var hit: Array[Debris] = []
 	for d: Debris in debris.values():
-		if d.chore == Chores.Chore.STAIN and Iso.fdist(d.position, p.position) <= Chores.THUMP_RADIUS:
+		if d.chore == Chores.Chore.STAIN and Iso.fdist(d.position, p.position) <= Chores.THUMP_RADIUS * _reach(p):
 			hit.append(d)
 	if hit.is_empty():
 		return
-	_thump_cd[p.pid] = Chores.THUMP_TIME
-	_cl_pulse.rpc(p.pid)
+	_thump_cd[p.pid] = Chores.THUMP_TIME / _reach(p)
+	_cl_pulse.rpc(p.pid, Chores.THUMP_RADIUS * _reach(p))
 	for d in hit:
 		_clear_debris(d, How.THUMP, p)
 
@@ -1489,11 +1519,11 @@ func _clear_debris(d: Debris, how: How, by: Player) -> void:
 
 
 @rpc("authority", "call_local", "unreliable")
-func _cl_pulse(pid: int) -> void:
+func _cl_pulse(pid: int, radius: float) -> void:
 	var p: Player = players.get(pid)
 	if p == null:
 		return
-	Fx.ring(level.entities, p.position, Chores.THUMP_RADIUS, Color("7fe6ff"), false)
+	Fx.ring(level.entities, p.position, radius, Color("7fe6ff"), false)
 	Audio.play_at("c_thump", level.entities, p.position)
 
 
@@ -1562,7 +1592,7 @@ func _srv_gag(pid: int, point: Vector2) -> void:
 					continue
 				if t.team == p.team:
 					t.hp = mini(t.max_hp, t.hp + int(g["heal"]))
-					_cl_buff.rpc(t.pid, 1.0, 0.1, t.hp)
+					_cl_buff.rpc(t.pid, 1.0, 0.1, t.hp, "+HYPE")
 				elif t.captured_by == 0:
 					_cl_dance.rpc(t.pid, float(g["duration"]))
 
@@ -1744,7 +1774,9 @@ func _srv_furniture_hit(idx: int, amount: float, pid: int, ability: int) -> void
 		_scuff(by.position)  # a crash leaves a mark on the floor
 	if f is WallPanel:
 		_drop_pictures(f, Iso.to_floor(f.position - by.position))
-	var most := Player.CRASH_DAMAGE if ability < 0 else float(Roster.ability(by.data, ability).get("demolition", 0.0))
+	if ability == 4 and not _borrow_ok(by):
+		return
+	var most := Player.CRASH_DAMAGE if ability < 0 else float(by.ability_spec(ability).get("demolition", 0.0))
 	_damage_furniture(f, clampf(amount, 0.0, most), by)
 
 
@@ -2035,6 +2067,186 @@ func _cl_debris_progress(id: int, progress: float, owner_on: bool) -> void:
 	if debris.has(id):
 		debris[id].owner_working = owner_on
 		debris[id].set_progress(progress)
+
+
+# ================================================================= pickups
+
+## Host: now and then something pops up on the floor (see Pickups), and
+## whoever it's for picks it up by walking over it.
+func _tick_pickups(delta: float) -> void:
+	for pu: Pickup in pickups.values():
+		if pu.life <= 0.0:
+			_cl_pickup_remove.rpc(pu.pickup_id)
+			continue
+		for p: Player in players.values():
+			if Iso.fdist(p.position, pu.position) <= Pickups.RADIUS and pu.takeable_by(p, self) \
+					and level.wall_between(p.position, pu.position).is_empty() and _wants(p, pu):
+				_take_pickup(pu, p)
+				break
+	if not pickups_on:
+		return
+	var war := phase == Phase.WAR
+	_pickup_t -= delta
+	if _pickup_t > 0.0:
+		return
+	var every: Vector2 = Pickups.WAR_EVERY if war else Pickups.CLEANUP_EVERY
+	_pickup_t = randf_range(every.x, every.y)
+	if pickups.size() >= (Pickups.WAR_MAX if war else Pickups.CLEANUP_MAX):
+		return
+	var kind := Pickups.roll(Pickups.WAR_ODDS if war else Pickups.CLEANUP_ODDS)
+	var arg := ""
+	var at := Vector2.INF
+	match kind:
+		Pickups.Kind.WEAPON:
+			var armed: Array = Roster.CHARACTERS.keys().filter(func(id: String) -> bool: return Roster.get_char(id)["weapon"].has("sprite"))
+			arg = armed.pick_random()
+		Pickups.Kind.TOOL:
+			# For the chore with the most left to do, near one of its jobs.
+			var job = _tool_job()
+			if job == null:
+				kind = Pickups.Kind.SKATES
+			else:
+				arg = str(chore_of(job))
+				at = _pickup_spot((job as Node2D).position, 1.5)
+	if at == Vector2.INF:
+		at = _pickup_spot(Vector2.INF, 0.0)
+	if at == Vector2.INF:
+		return
+	_cl_pickup_add.rpc(_next_pickup_id, kind, arg, at,
+		Pickups.LIFETIME if war else Pickups.CLEANUP_LIFETIME)
+	_next_pickup_id += 1
+
+
+## Someone doesn't pick up their own weapon (nothing would change).
+func _wants(p: Player, pu: Pickup) -> bool:
+	return not (pu.kind == Pickups.Kind.WEAPON and p.data["weapon"]["name"] == Roster.get_char(pu.arg)["weapon"]["name"])
+
+
+## A job of the chore with the most left to do (weighted by what's left), or null.
+func _tool_job():
+	var totals := chore_totals()
+	var total := 0.0
+	for c: int in Chores.OWNER:
+		total += float(totals.get(c, [0, 0.0])[1])
+	if total <= 0.0:
+		return null
+	var r := randf() * total
+	var chosen := Chores.Chore.NONE
+	for c: int in Chores.OWNER:
+		r -= float(totals.get(c, [0, 0.0])[1])
+		if r <= 0.0:
+			chosen = c
+			break
+	var mine := open_jobs().filter(func(j: Object) -> bool: return chore_of(j) == chosen)
+	return mine.pick_random() if not mine.is_empty() else null
+
+
+## Somewhere open for a pickup to turn up: near `near` (within `spread` tiles)
+## or anywhere, away from people, the bases, the rug and other pickups.
+func _pickup_spot(near: Vector2, spread: float) -> Vector2:
+	var size := Vector2(level.room.size_tiles)
+	for attempt in 16:
+		var t := Iso.local_to_tile(near) + Vector2(randf_range(-spread, spread), randf_range(-spread, spread)) \
+			if near != Vector2.INF else Vector2(randf_range(1.0, size.x - 1.0), randf_range(1.0, size.y - 1.0))
+		if t.x + t.y < 4.0:
+			continue  # (under the scoreboard)
+		var at := level.walkable(Iso.tile_to_local(t))
+		if near != Vector2.INF and not level.wall_between(near, at).is_empty():
+			continue
+		if level.home.contains(at) or level.bases[0].contains(at) or level.bases[1].contains(at):
+			continue
+		var crowded := false
+		for p: Player in players.values():
+			crowded = crowded or Iso.fdist(p.position, at) < (40.0 if near == Vector2.INF else 20.0)
+		for pu: Pickup in pickups.values():
+			crowded = crowded or Iso.fdist(pu.position, at) < 40.0
+		if not crowded:
+			return at
+	return Vector2.INF
+
+
+func _take_pickup(pu: Pickup, p: Player) -> void:
+	match pu.kind:
+		Pickups.Kind.ZOOMIES:
+			_cl_buff.rpc(p.pid, Pickups.ZOOMIES_SPEED, Pickups.ZOOMIES_TIME, p.hp, "ZOOMIES!")
+		Pickups.Kind.SKATES:
+			_cl_buff.rpc(p.pid, Pickups.SKATES_SPEED, Pickups.SKATES_TIME, p.hp, "SKATES!")
+		Pickups.Kind.SNACK:
+			p.hp = mini(p.max_hp, p.hp + Pickups.SNACK_HEAL)
+			_cl_heal.rpc(p.pid, p.hp)
+	log_event("pickup %s (%s) by %d" % [Pickups.Kind.keys()[pu.kind], pu.arg, p.pid])
+	_cl_pickup_taken.rpc(pu.pickup_id, p.pid)
+
+
+## Is `p` still holding a weapon they picked up? (A little slack for the last
+## shots, which reach the host a moment after the timer runs out.)
+func _borrow_ok(p: Player) -> bool:
+	return p.borrowed != "" and p.borrow_t > -0.5
+
+
+func _clear_pickups() -> void:
+	for id: int in pickups.keys():
+		_cl_pickup_remove.rpc(id)
+
+
+@rpc("authority", "call_local", "reliable")
+func _cl_pickup_add(id: int, kind: int, arg: String, pos: Vector2, lifetime: float) -> void:
+	var pu := Pickup.new()
+	pu.setup(id, kind, arg, pos, lifetime)
+	level.entities.add_child(pu)
+	pickups[id] = pu
+	Audio.play_at("poof", level.entities, pos, -6.0)
+
+
+@rpc("authority", "call_local", "reliable")
+func _cl_pickup_taken(id: int, pid: int) -> void:
+	var pu: Pickup = pickups.get(id)
+	if pu == null:
+		return
+	pickups.erase(id)
+	var p: Player = players.get(pid)
+	if p:
+		match pu.kind:
+			Pickups.Kind.TREAT:
+				if p.is_multiplayer_authority():
+					p.gag_charge = 1.0
+			Pickups.Kind.BUBBLE_WRAP:
+				p.shield = Pickups.SHIELD
+				p.shield_t = Pickups.SHIELD_TIME
+			Pickups.Kind.WEAPON:
+				p.borrowed = pu.arg
+				p.borrow_t = Pickups.WEAPON_TIME
+			Pickups.Kind.TOOL:
+				p.turbo_chore = int(pu.arg)
+				p.turbo_t = Pickups.TURBO_TIME
+		var col := Roster.TEAM_COLORS[p.team] if phase == Phase.WAR else Color("8ff0a4")
+		hud.feed("%s grabbed %s!" % [p.display_name, pu.label()], col)
+		var shout: String = Pickups.SHORT.get(pu.kind, "")
+		if pu.kind == Pickups.Kind.TOOL:
+			shout = "TURBO!"
+		if shout != "" and pu.kind != Pickups.Kind.ZOOMIES and pu.kind != Pickups.Kind.SKATES:
+			Fx.text(level.entities, p.position + Vector2(0, -p.sprite_height() - 8), shout, Pickups.COLORS[pu.kind])
+	Audio.play_at("pickup", level.entities, pu.position)
+	Fx.burst(level.entities, pu.position + Vector2(0, -12), Pickups.COLORS.get(pu.kind, Color.WHITE))
+	pu.queue_free()
+
+
+@rpc("authority", "call_local", "reliable")
+func _cl_pickup_remove(id: int) -> void:
+	var pu: Pickup = pickups.get(id)
+	if pu == null:
+		return
+	pickups.erase(id)
+	Fx.puff(level.entities, pu.position + Vector2(0, -12), Color(1, 1, 1, 0.7))
+	pu.queue_free()
+
+
+@rpc("authority", "call_local", "reliable")
+func _cl_shield(pid: int, amount: int) -> void:
+	if players.has(pid):
+		players[pid].shield = amount
+		if amount <= 0:
+			players[pid].shield_t = 0.0
 
 
 # =================================================================== misc

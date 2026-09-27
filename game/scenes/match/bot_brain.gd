@@ -79,6 +79,10 @@ func _war(inp: Dictionary, delta: float) -> void:
 	elif not _is_runner() and foe:
 		goal = foe.position
 
+	# Something good on the floor nearby? Grab it on the way (unless someone's on us).
+	var grab := _pickup_nearby(90.0)
+	if grab and not me.carrying and (foe == null or Iso.fdist(foe.position, me.position) > 50.0):
+		goal = grab.position
 	inp["move"] = _steer(goal, delta)
 	if _breaching(inp, goal, foe, delta):
 		return
@@ -87,7 +91,7 @@ func _war(inp: Dictionary, delta: float) -> void:
 		return
 	var dist := Iso.fdist(foe.position, me.position)
 	var to_foe := Iso.to_floor(foe.position - me.position).normalized()
-	var w: Dictionary = me.data["weapon"]
+	var w: Dictionary = me.data["weapon"] if me.has_bone() else me.weapon_spec()
 	var kind := int(w["kind"])
 	# Behind a wall? Keep moving instead of firing into the drywall.
 	var line_clear := arena.level.wall_between(me.position, foe.position).is_empty()
@@ -372,6 +376,11 @@ func _cleanup(inp: Dictionary, delta: float) -> void:
 		inp["move"] = _steer(arena.level.walkable(held.home), delta) * BOT_PACE
 		return
 	_carry_t = 0.0
+	# A turbo tool for my chore (or skates) nearby: worth the detour.
+	var grab := _pickup_nearby(140.0)
+	if grab:
+		inp["move"] = _steer(grab.position, delta) * BOT_PACE
+		return
 	for job in _skip.keys():  # (some may be freed by now)
 		_skip[job] -= delta
 		if _skip[job] <= 0.0:
@@ -518,6 +527,18 @@ func _pick_job() -> Object:
 			if e[1] == _job and e[0] * 1.5 >= scored[0][0]:
 				return _job
 	return scored[k][1]
+
+
+## The nearest pickup this bot could take, within `radius`, or null.
+func _pickup_nearby(radius: float) -> Pickup:
+	var best: Pickup = null
+	var best_d := radius
+	for pu: Pickup in arena.pickups.values():
+		var d := Iso.fdist(pu.position, me.position)
+		if d < best_d and pu.takeable_by(me, arena) and arena._wants(me, pu):
+			best = pu
+			best_d = d
+	return best
 
 
 func _closest_to(pos: Vector2) -> bool:

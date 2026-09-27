@@ -871,6 +871,67 @@ SPRITES: dict[str, dict] = {
             "...dddd..",
         ],
     },
+    # ------------------------------------------------------------ PICKUPS
+    # Icons inside the bubbles that pop up around the house (see Pickups).
+    "pu_zoomies": {  # a lightning bolt: run faster
+        "palette": {"y": "#ffd84d", "w": "#fff4b0"},
+        "rows": [
+            "....yyy..",
+            "...ywy...",
+            "..yyy....",
+            ".yyyyyy..",
+            "....ywy..",
+            "...yyy...",
+            "..yy.....",
+            ".y.......",
+        ],
+    },
+    "pu_bubble": {  # a sheet of bubble wrap: soaks up hits
+        "palette": {"b": "#9fd8ff", "w": "#f4fbff"},
+        "rows": [
+            "bbbbbbbbb",
+            "bwbbwbbwb",
+            "bbbbbbbbb",
+            "bbwbbwbbb",
+            "bbbbbbbbb",
+            "bwbbwbbwb",
+            "bbbbbbbbb",
+        ],
+    },
+    "pu_snack": {  # a fish cracker: heals
+        "palette": {"o": "#f2a34f", "l": "#ffcf8a", "e": "#3b2a30"},
+        "rows": [
+            "...ooo...o",
+            ".ollooo.oo",
+            "oeoooooooo",
+            ".oooooo.oo",
+            "...ooo...o",
+        ],
+    },
+    "pu_treat": {  # a star: the gag's ready
+        "palette": {"p": "#c78cff", "w": "#efdcff"},
+        "rows": [
+            "....p....",
+            "...ppp...",
+            "pppwppppp",
+            ".ppppppp.",
+            "..ppppp..",
+            "..pp.pp..",
+            ".pp...pp.",
+        ],
+    },
+    "pu_skates": {  # a roller skate: zoom around the cleanup
+        "palette": {"k": "#ff8fc0", "l": "#ffd0e4", "w": "#4a4a58"},
+        "rows": [
+            "..kk.....",
+            "..kl.....",
+            "..kk.....",
+            "..kkkkk..",
+            "..kkkkkk.",
+            "..kkkkkkk",
+            "...w...w.",
+        ],
+    },
 }
 
 

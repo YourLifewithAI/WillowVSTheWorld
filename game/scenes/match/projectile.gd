@@ -34,13 +34,13 @@ const SPRITES := {"ball": "p_ball", "rocket": "p_rocket", "egg": "p_egg", "toast
 func setup(from: Player, which: int, direction: Vector2, id: int, is_authoritative: bool, from_ambush: bool) -> void:
 	shooter = from
 	ability = which
-	spec = Roster.ability(from.data, which)
+	spec = from.ability_spec(which)
 	dir = direction.normalized()
 	authoritative = is_authoritative
 	ambush = from_ambush
 	proj_id = id
 	# Lobbed weapons, and the Litter Bomb gag (the only gag that's thrown).
-	lob = (which == 0 and int(spec["kind"]) == Roster.Weapon.LOB) or which == 2
+	lob = ((which == 0 or which == 4) and int(spec["kind"]) == Roster.Weapon.LOB) or which == 2
 	name = "Proj_%d_%d" % [from.pid, id]
 	position = from.position + Iso.to_screen(dir * (3.0 if lob else 8.0))
 	_start_z = maxf(from.z, 8.0) if lob else HEIGHT + from.z * 0.5
