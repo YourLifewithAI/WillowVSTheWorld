@@ -106,6 +106,8 @@ var _chore_log: Dictionary = {}  # chore -> {"done", "owner", "other"} weight cl
 var work_clock := 0.0
 ## Host: which bot is heading for which job (see BotBrain._cleanup).
 var claims: Dictionary = {}
+## How long after a picked-up weapon runs out its last shots still count.
+const BORROW_GRACE := 1.5
 ## Things that popped up on the floor (see Pickups): id -> Pickup.
 var pickups: Dictionary = {}
 ## Off for the scripted tests (--pickups=0), so nothing random turns up.
@@ -1592,7 +1594,7 @@ func _srv_gag(pid: int, point: Vector2) -> void:
 					continue
 				if t.team == p.team:
 					t.hp = mini(t.max_hp, t.hp + int(g["heal"]))
-					_cl_buff.rpc(t.pid, 1.0, 0.1, t.hp, "+HYPE")
+					_cl_heal.rpc(t.pid, t.hp)
 				elif t.captured_by == 0:
 					_cl_dance.rpc(t.pid, float(g["duration"]))
 
@@ -2117,9 +2119,13 @@ func _tick_pickups(delta: float) -> void:
 	_next_pickup_id += 1
 
 
-## Someone doesn't pick up their own weapon (nothing would change).
+## Nobody picks up their own weapon (nothing would change), or a second one
+## while the first (or its last shots) is still going: its hits must still count
+## as the weapon that fired them.
 func _wants(p: Player, pu: Pickup) -> bool:
-	return not (pu.kind == Pickups.Kind.WEAPON and p.data["weapon"]["name"] == Roster.get_char(pu.arg)["weapon"]["name"])
+	if pu.kind != Pickups.Kind.WEAPON:
+		return true
+	return p.data["weapon"]["name"] != Roster.get_char(pu.arg)["weapon"]["name"] and not _borrow_ok(p)
 
 
 ## A job of the chore with the most left to do (weighted by what's left), or null.
@@ -2155,6 +2161,12 @@ func _pickup_spot(near: Vector2, spread: float) -> Vector2:
 			continue
 		if level.home.contains(at) or level.bases[0].contains(at) or level.bases[1].contains(at):
 			continue
+		# Not in a hole in a wall (it could be mended round it), nor hard up against one.
+		var by_wall := false
+		for panel in level.wall_panels:
+			by_wall = by_wall or panel.distance_to(at) < Pickups.RADIUS + 2.0
+		if by_wall:
+			continue
 		var crowded := false
 		for p: Player in players.values():
 			crowded = crowded or Iso.fdist(p.position, at) < (40.0 if near == Vector2.INF else 20.0)
@@ -2178,10 +2190,10 @@ func _take_pickup(pu: Pickup, p: Player) -> void:
 	_cl_pickup_taken.rpc(pu.pickup_id, p.pid)
 
 
-## Is `p` still holding a weapon they picked up? (A little slack for the last
-## shots, which reach the host a moment after the timer runs out.)
+## Is `p` still holding a weapon they picked up? (Slack for the last shots,
+## which are still flying, or reach the host a moment after the timer runs out.)
 func _borrow_ok(p: Player) -> bool:
-	return p.borrowed != "" and p.borrow_t > -0.5
+	return p.borrowed != "" and p.borrow_t > -BORROW_GRACE
 
 
 func _clear_pickups() -> void:

@@ -372,7 +372,7 @@ func _update_card(c: Dictionary) -> void:
 		if mine == Chores.Chore.NONE:
 			label.text = "Help out! Hold %s by anything" % keys["interact"]
 		elif left > 0:
-			label.text = "%s%s  %d left" % ["TURBO! " if me.turbo_t > 0.0 else "", Chores.VERB.get(mine, ""), left]
+			label.text = "%s%s  %d left" % ["TURBO! " if me.turbo_t > 0.0 and me.turbo_chore == mine else "", Chores.VERB.get(mine, ""), left]
 		else:
 			label.text = "All done! Now help the others"
 	elif me.is_ko:

@@ -955,7 +955,8 @@ func heal(new_hp: int) -> void:
 func apply_buff(mult: float, duration: float, heal_to: int, label: String = "+HYPE") -> void:
 	hp = heal_to
 	Fx.text(arena.level.entities, position + Vector2(0, -sprite_height() - z - 4), label, Color("62f2ff"))
-	if is_multiplayer_authority():
+	# A weaker (or shorter) buff never cuts a stronger one short.
+	if is_multiplayer_authority() and (_buff_t <= 0.0 or mult > buff_mult or (mult == buff_mult and duration > _buff_t)):
 		buff_mult = mult
 		_buff_t = duration
 
@@ -976,6 +977,8 @@ func reset_for_phase() -> void:
 	shield_t = 0.0
 	turbo_t = 0.0
 	if is_multiplayer_authority():
+		buff_mult = 1.0
+		_buff_t = 0.0
 		knock_vel = Vector2.ZERO
 		stun = 0.0
 		vanish_t = 0.0
@@ -1003,7 +1006,7 @@ func _process(delta: float) -> void:
 	_swing = move_toward(_swing, 0.0, delta * 4.0)
 	gag_t = maxf(0.0, gag_t - delta)
 	dance_t = maxf(0.0, dance_t - delta)
-	borrow_t = maxf(-1.0, borrow_t - delta)
+	borrow_t = maxf(-3.0, borrow_t - delta)
 	turbo_t = maxf(0.0, turbo_t - delta)
 	shield_t = maxf(0.0, shield_t - delta)
 	if shield_t <= 0.0:

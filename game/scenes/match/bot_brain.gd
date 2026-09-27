@@ -81,10 +81,12 @@ func _war(inp: Dictionary, delta: float) -> void:
 
 	# Something good on the floor nearby? Grab it on the way (unless someone's on us).
 	var grab := _pickup_nearby(90.0)
+	var aim := goal
 	if grab and not me.carrying and (foe == null or Iso.fdist(foe.position, me.position) > 50.0):
-		goal = grab.position
-	inp["move"] = _steer(goal, delta)
-	if _breaching(inp, goal, foe, delta):
+		aim = grab.position
+	inp["move"] = _steer(aim, delta)
+	# (Only ever break through a wall on the way to the real goal, never for a pickup.)
+	if _breaching(inp, goal if aim == goal else me.position, foe, delta):
 		return
 
 	if foe == null or _hesitate > 0.0:
@@ -212,6 +214,9 @@ func _breaching(inp: Dictionary, goal: Vector2, foe: Player, delta: float) -> bo
 	var near := Iso.closest_on_segment(me.position, l[0], l[1])
 	var to_wall := Iso.to_floor(near - me.position)
 	var tool := _breach_input()
+	if tool == "":
+		_breach = null  # (a picked-up wrecking ball ran out)
+		return false
 	var reach := 20.0 if tool == "attack" or int(me.data["special"]["kind"]) == Roster.Special.SLAM else 60.0
 	if to_wall.length() > reach:
 		inp["move"] = _steer(near, delta)
@@ -535,7 +540,10 @@ func _pickup_nearby(radius: float) -> Pickup:
 	var best_d := radius
 	for pu: Pickup in arena.pickups.values():
 		var d := Iso.fdist(pu.position, me.position)
-		if d < best_d and pu.takeable_by(me, arena) and arena._wants(me, pu):
+		if pu.kind == Pickups.Kind.TOOL and int(pu.arg) != arena.my_chore(me):
+			continue  # (a tool for someone else's chore wouldn't help this bot)
+		if d < best_d and pu.takeable_by(me, arena) and arena._wants(me, pu) \
+				and arena.level.wall_between(me.position, pu.position).is_empty():
 			best = pu
 			best_d = d
 	return best

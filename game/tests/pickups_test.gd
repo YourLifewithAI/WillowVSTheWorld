@@ -67,6 +67,8 @@ func _run() -> void:
 	# ------------------------------------------------------------ the war
 	var took := await _give(willow, Pickups.Kind.ZOOMIES, "")
 	check(took and willow.buff_mult == Pickups.ZOOMIES_SPEED, "the Zoomies make you faster")
+	arena._cl_buff(willow.pid, 1.35, 3.0, willow.hp, "+HYPE")
+	check(willow.buff_mult == Pickups.ZOOMIES_SPEED, "...and a teammate's weaker Hype Track doesn't cut them short")
 	willow.hp = 10
 	await _give(willow, Pickups.Kind.SNACK, "")
 	check(willow.hp == 10 + Pickups.SNACK_HEAL, "a Snack heals (10 -> %d)" % willow.hp)
@@ -96,6 +98,10 @@ func _run() -> void:
 	check(shells.size() == 1 and shells[0].lob and shells[0].ability == 4, "...and fires it: a lobbed rocket, like Biscuit's")
 	await frames(90)
 	_park(willow)
+	took = await _give(willow, Pickups.Kind.WEAPON, "pepper")
+	check(not took, "...and she can't swap it for another while it (or its last shots) is still going")
+	for q: Pickup in arena.pickups.values():
+		arena._cl_pickup_remove(q.pickup_id)
 	var target: Player = cast["zoomba"]
 	_place(target, 10.0, 12.0)
 	target.invuln = 0.0
@@ -107,12 +113,25 @@ func _run() -> void:
 	target.invuln = 0.0
 	hp = target.hp
 	arena._srv_hit(willow.pid, target.pid, 4, Vector2.RIGHT, false)
-	check(target.hp == hp and willow.weapon_ability() == 0, "...but not once it's run out (she's back to her laser)")
+	check(target.hp < hp and willow.weapon_ability() == 0, "...a last rocket still landing just after it runs out counts")
+	willow.borrow_t = -Match.BORROW_GRACE - 0.1
+	target.invuln = 0.0
+	hp = target.hp
+	arena._srv_hit(willow.pid, target.pid, 4, Vector2.RIGHT, false)
+	check(target.hp == hp and willow.weapon_ability() == 0, "...but not long after (she's back to her laser)")
 	_park(target)
 	took = await _give(biscuit, Pickups.Kind.WEAPON, "biscuit")
 	check(not took and arena.pickups.size() == 1, "nobody picks up their own weapon")
 	arena._cl_pickup_remove(arena.pickups.keys()[0])
 
+	# Never in (or hard up against) a wall, where a mended wall could shut one in.
+	var closest := INF
+	for k in 200:
+		var spot := arena._pickup_spot(Vector2.INF, 0.0)
+		if spot != Vector2.INF:
+			for panel in arena.level.wall_panels:
+				closest = minf(closest, panel.distance_to(spot))
+	check(closest >= Pickups.RADIUS, "pickups never turn up against a wall (closest %.1f px)" % closest)
 	# They turn up on their own, away from the bases and the rug, and pop.
 	arena.pickups_on = true
 	arena._pickup_t = 0.0
