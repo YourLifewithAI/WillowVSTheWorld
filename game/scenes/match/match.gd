@@ -67,6 +67,7 @@ var _next_debris_id := 1
 var _sync_t := 0.0
 var _remote_sync_t := 0.0
 var _progress_sync_t := 0.0
+var _debris_sync_t := 0.0
 var _load_timeout := 8.0
 var _nav_dirty := false
 ## Players a bot is standing in for while their controller is gone (online).
@@ -1071,20 +1072,31 @@ func _cl_pull(tid: int, pull: Vector2) -> void:
 
 # =============================================================== furniture
 
-func report_furniture_hit(f: Furniture, amount: float) -> void:
+## `by` hit `f` with ability `ability` (see Roster.ability), or -1: they were
+## knocked flying into it.
+func report_furniture_hit(f: Furniture, amount: float, by: Player, ability: int) -> void:
 	if amount <= 0.0 or not f.can_be_damaged() or phase != Phase.WAR:
 		return
 	if multiplayer.is_server():
-		_srv_furniture_hit(f.index, amount)
+		_srv_furniture_hit(f.index, amount, by.pid, ability)
 	else:
-		_srv_furniture_hit.rpc_id(1, f.index, amount)
+		_srv_furniture_hit.rpc_id(1, f.index, amount, by.pid, ability)
 
 
+## The host checks the hit could really have happened: the sender plays that
+## character, it's close enough, and it's no harder than that ability can hit.
 @rpc("any_peer", "call_remote", "reliable")
-func _srv_furniture_hit(idx: int, amount: float) -> void:
+func _srv_furniture_hit(idx: int, amount: float, pid: int, ability: int) -> void:
 	if not multiplayer.is_server() or phase != Phase.WAR or idx < 0 or idx >= level.furniture.size():
 		return
-	_damage_furniture(level.furniture[idx], clampf(amount, 0.0, 120.0))
+	var by: Player = players.get(pid)
+	if by == null or by.get_multiplayer_authority() != _sender():
+		return
+	var f := level.furniture[idx]
+	if Iso.fdist(by.position, f.position) > 420.0:
+		return
+	var most := Player.CRASH_DAMAGE if ability < 0 else float(Roster.ability(by.data, ability).get("demolition", 0.0))
+	_damage_furniture(f, clampf(amount, 0.0, most))
 
 
 func _damage_furniture(f: Furniture, amount: float) -> void:
@@ -1230,6 +1242,11 @@ func _cl_debris_progress(id: int, progress: float) -> void:
 
 
 func _tick_debris(delta: float) -> void:
+	# Progress bars update ten times a second (not every frame for every pile).
+	_debris_sync_t += delta
+	var send := _debris_sync_t >= 0.1
+	if send:
+		_debris_sync_t = 0.0
 	for id: int in debris.keys():
 		var d: Debris = debris[id]
 		var power := 0.0
@@ -1252,7 +1269,7 @@ func _tick_debris(delta: float) -> void:
 			if phase == Phase.CLEANUP and cleaner:
 				stats[cleaner.pid]["fixes"] += 1
 			_cl_debris_remove.rpc(id)
-		else:
+		elif send:
 			_cl_debris_progress.rpc(id, d.progress)
 
 

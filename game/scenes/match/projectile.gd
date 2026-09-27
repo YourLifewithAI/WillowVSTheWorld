@@ -87,7 +87,7 @@ func _physics_process(delta: float) -> void:
 		if f and not _hit.has(f):
 			_hit[f] = true
 			if authoritative:
-				arena.report_furniture_hit(f, float(spec.get("demolition", 0.0)))
+				arena.report_furniture_hit(f, float(spec.get("demolition", 0.0)), shooter, ability)
 			if not spec.get("through_walls", false):
 				Fx.burst(arena.level.entities, position + Vector2(0, -z), Color.WHITE)
 				Audio.play_at("thud", arena.level.entities, position, -6.0)

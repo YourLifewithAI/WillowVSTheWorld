@@ -357,7 +357,7 @@ func _check_crashes(delta: float) -> void:
 		var f := get_slide_collision(k).get_collider() as Furniture
 		if f and not _crash_cd.has(f):
 			_crash_cd[f] = 0.4
-			arena.report_furniture_hit(f, CRASH_DAMAGE)
+			arena.report_furniture_hit(f, CRASH_DAMAGE, self, -1)
 
 
 # ==================================================================== stealth
@@ -589,7 +589,7 @@ func _hit_arc(w: Dictionary, ability: int, ambush: bool) -> void:
 	for f in arena.level.furniture:
 		var off := Iso.to_floor(f.position - position)
 		if f.can_be_damaged() and off.length() <= reach + f.reach() and absf(rad_to_deg(facing.angle_to(off))) <= half_arc:
-			arena.report_furniture_hit(f, w.get("demolition", 0.0))
+			arena.report_furniture_hit(f, w.get("demolition", 0.0), self, ability)
 
 
 ## Reports every enemy, breakable and piece of furniture within a radius of a point.
@@ -608,7 +608,7 @@ func hit_area(center: Vector2, radius: float, ability: int, force: float, demoli
 	if demolition > 0.0:
 		for f in arena.level.furniture:
 			if f.can_be_damaged() and Iso.fdist(center, f.position) <= radius + f.reach():
-				arena.report_furniture_hit(f, demolition)
+				arena.report_furniture_hit(f, demolition, self, ability)
 
 
 @rpc("authority", "call_local", "reliable")
