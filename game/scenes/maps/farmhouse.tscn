@@ -398,9 +398,11 @@ accent = Color(0.8784, 0.3529, 0.3529, 1)
 mirror = true
 
 [node name="MilkCounter" type="Node2D" parent="Entities"]
-position = Vector2(-83.2, 160)
+position = Vector2(-105.6, 161)
 script = ExtResource("5_mess")
 sprite_name = "milk"
+high = true
+hang = 14
 
 [node name="Vase" type="Node2D" parent="Entities"]
 position = Vector2(12.8, 188.8)
@@ -423,9 +425,11 @@ script = ExtResource("5_mess")
 sprite_name = "lamp"
 
 [node name="PieTable" type="Node2D" parent="Entities"]
-position = Vector2(-1.6, 205.6)
+position = Vector2(0, 196.2)
 script = ExtResource("5_mess")
 sprite_name = "pie"
+high = true
+hang = 12
 
 [node name="Cushion" type="Node2D" parent="Entities"]
 position = Vector2(-80, 174.4)
@@ -462,3 +466,17 @@ position = Vector2(-51.2, 224)
 script = ExtResource("5_mess")
 sprite_name = "plant"
 spill_sprite = "dirt"
+
+[node name="PicKitchen" type="Node2D" parent="Entities"]
+position = Vector2(-36.8, 117.6)
+script = ExtResource("5_mess")
+sprite_name = "picture"
+high = true
+hang = 10
+
+[node name="PicMudroom" type="Node2D" parent="Entities"]
+position = Vector2(-75.2, 61.6)
+script = ExtResource("5_mess")
+sprite_name = "picture"
+high = true
+hang = 10

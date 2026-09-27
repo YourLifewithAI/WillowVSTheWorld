@@ -10,7 +10,7 @@ const LIST := {
 		"name": "The Family Home", "home": "Family home",
 		"blurb": "Kitchen, dining room, den and a big living room in a ring. Bases behind doors; the big hitters can knock through walls.",
 		"players": "4-8", "scene": "res://scenes/maps/family_home.tscn",
-		"war_time": 180.0, "cleanup_time": 65.0,
+		"war_time": 180.0, "cleanup_time": 58.0,
 	},
 	"living_room": {
 		"name": "The Living Room (classic)", "home": "Open-plan living room",
@@ -28,13 +28,13 @@ const LIST := {
 		"name": "The Farmhouse", "home": "Country farmhouse",
 		"blurb": "Pantry, mudroom, workshop and a farm kitchen around an old stone chimney, with a porch all the way round.",
 		"players": "4-6", "scene": "res://scenes/maps/farmhouse.tscn",
-		"cleanup_time": 60.0,
+		"cleanup_time": 54.0,
 	},
 	"suburbs": {
 		"name": "Suburban House", "home": "Big house in the suburbs",
 		"blurb": "A long ranch house: kitchen, dining room, living room, garage and den. Long runs, so passing matters.",
 		"players": "6-8", "scene": "res://scenes/maps/suburbs.tscn",
-		"war_time": 210.0, "cleanup_time": 70.0,
+		"war_time": 210.0, "cleanup_time": 63.0,
 	},
 }
 

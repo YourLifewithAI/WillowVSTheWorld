@@ -74,6 +74,9 @@ var dance_t := 0.0
 var gag_t := 0.0
 ## Host only: when this character was last seen hidden (validates ambushes).
 var last_stealth_time := -100.0
+## Host only: the cleanup job a bot has picked (it works that one when in reach,
+## rather than whatever's nearest).
+var focus_job = null  # (untyped: floor mess may be freed under it)
 
 # --- Simulated by the owner, streamed to everyone else.
 var facing := Vector2.RIGHT
@@ -134,6 +137,11 @@ var _hop_h := 0.0
 ## A pounce in the air: the melee move to swing when it lands.
 var _pounce: Dictionary = {}
 var _pounce_ambush := false
+## Cleanup, on this screen: where the arrow on the ring points (see Match.pointer_for),
+## and whether this character's own jobs are all done.
+var _pointer: Dictionary = {}
+var _pointer_t := 0.0
+var _all_done := false
 
 
 func setup(p_id: int, info: Dictionary, p_arena: Match) -> void:
@@ -374,7 +382,8 @@ func _net_state(p: Vector2, f: Vector2, pz: float, flags: int) -> void:
 	hiding = flags & 32 != 0
 
 
-## Knocked into furniture hard enough? That furniture takes a beating.
+## Knocked into furniture hard enough? That furniture takes a beating (and
+## the floor gets a scuff mark; a wall just loses its pictures).
 func _check_crashes(delta: float) -> void:
 	for key in _crash_cd.keys():
 		_crash_cd[key] -= delta
@@ -384,7 +393,7 @@ func _check_crashes(delta: float) -> void:
 		return
 	for k in get_slide_collision_count():
 		var f := get_slide_collision(k).get_collider() as Furniture
-		if f and not f is WallPanel and not _crash_cd.has(f):
+		if f and not _crash_cd.has(f):
 			_crash_cd[f] = 0.4
 			arena.report_furniture_hit(f, CRASH_DAMAGE, self, -1)
 
@@ -1019,8 +1028,27 @@ func _process(delta: float) -> void:
 		if _ghost_t <= 0.0:
 			_ghost_t = 0.03
 			Fx.ghost(arena.level.entities, _sprite, global_position)
+	_update_pointer(delta)
 	queue_redraw()
 	_overlay.queue_redraw()
+
+
+## Cleanup: finds this local player's nearest job a few times a second, and
+## cheers once when their own list is done.
+func _update_pointer(delta: float) -> void:
+	if arena.phase != Match.Phase.CLEANUP or not is_local():
+		_pointer = {}
+		return
+	_pointer_t -= delta
+	if _pointer_t > 0.0:
+		return
+	_pointer_t = 0.25
+	_pointer = arena.pointer_for(self)
+	var done: bool = arena.my_chore(self) != Chores.Chore.NONE and not _pointer.get("own", false)
+	if done and not _all_done:
+		Fx.text(arena.level.entities, position + Vector2(0, -sprite_height() - 12), "ALL DONE! HELP!", marker_color())
+		Audio.play_at("c_done", arena.level.entities, position)
+	_all_done = done
 
 
 func _update_weapon() -> void:
@@ -1065,6 +1093,7 @@ func _draw() -> void:
 	var col: Color = Color("ff5a6e") if _revealed else Roster.TEAM_COLORS[team]
 	col.a = 0.95 if is_local() or _revealed else 0.55
 	draw_polyline(ring, col, 2.0 if is_local() and arena.shared_screen() else 1.0)
+	_draw_pointer()
 	# The Claw hangs from a cable on a trolley that rides the ceiling rails.
 	if char_id == "claw" and not is_ko:
 		var top := Vector2(0, round(-z) - sprite_height() + 2)
@@ -1082,6 +1111,30 @@ func _draw() -> void:
 		var edge := Iso.ellipse(r, 28)
 		edge.append(edge[0])
 		draw_polyline(edge, Color(1, 0.35, 0.35, 0.8), 1.0)
+
+
+## Cleanup: an arrow on the ring toward this player's nearest job, and a tick
+## once their own jobs are all done.
+func _draw_pointer() -> void:
+	if _pointer.is_empty() and not _all_done:
+		return
+	var col := marker_color() if arena.shared_screen() else Color.WHITE
+	if _all_done:
+		var t := Iso.to_screen(Vector2(11, 0)) + Vector2(1, -2)
+		draw_polyline(PackedVector2Array([t, t + Vector2(2, 2), t + Vector2(6, -3)]), Color("8ff0a4"), 1.5)
+	if _pointer.is_empty():
+		return
+	var dir := Iso.to_floor(_pointer["at"] - position)
+	if dir.length() < 14.0:
+		return  # you're there
+	dir = dir.normalized()
+	var tip := Iso.to_screen(dir * 15.0)
+	var base := Iso.to_screen(dir * 11.0)
+	var side := Iso.to_screen(dir.orthogonal() * 3.0)
+	var poly := PackedVector2Array([tip, base + side, base - side])
+	draw_colored_polygon(poly, Color("2b1d2a"))
+	draw_colored_polygon(PackedVector2Array([tip - (tip - base) * 0.25, base + side * 0.6, base - side * 0.6]),
+		col if _pointer["own"] else Color(0.8, 0.8, 0.8))
 
 
 ## The bobbing arrow over your own character; with several people on one

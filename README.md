@@ -12,10 +12,13 @@ Grab the remote, carry it to your team's rug, and hold it there for two seconds 
 change the channel. Blast anyone who tries, and the furniture too. KOs are just naps.
 
 **Phase 2: Cover it up.** *CAR IN THE DRIVEWAY!* Truce. Everyone, both teams,
-rebuilds the wrecked furniture, stands lamps back up, scrubs the scorch marks and
-returns the remote. The war's
-winners only get to watch their show if the house passes inspection. Otherwise
-everybody is grounded.
+cleans up, and everyone does it differently: Zoomba vacuums, Willow bats books and
+toys under the couch, Bass thumps the stains away, Pepper fetches whatever got
+knocked over, Biscuit kneads the cushions, Unit-7 fixes, the Claw lifts and Kiwi
+puts things back up high. Anyone can help with anything, but at a fifth of the
+speed, so after a big war the house only gets spotless if everyone plays to their
+strengths. The war's winners only get to watch their show if the house passes
+inspection. Otherwise everybody is grounded.
 
 | Pick a side | Clean up together |
 |---|---|
@@ -67,7 +70,7 @@ pets are sneaky and chaotic, the robots have sensors and are great at repairs.
 | **Zoomba**, robot vacuum | Dust Cannon | **Spot Clean**: spins, flinging everyone around it | Hides under furniture for ambushes | Flips over when hit hard |
 | **Unit-7**, helper bot | Toaster Cannon | **Spatula Flip**: flips you into the air, stunned | X-ray vision; rebuilds twice as fast | Clunky |
 | **The Claw**, ceiling gantry | Wrecking Ball | **Yoink!**: reels you in under the claw | Rides the ceiling; lifts heavy things alone | Long reboot after a KO |
-| **Bass**, smart speaker | Subwoofer Cannon | **Feedback**: a squeal that blasts you away | Cleaning playlist speeds up the team's tidying | No legs: tiny dash |
+| **Bass**, smart speaker | Subwoofer Cannon | **Feedback**: a squeal that blasts you away | Cleaning playlist speeds up everyone's cleaning | No legs: tiny dash |
 
 Everyone also has a **gag**: a big, silly, charge-up move themed on what they are,
 which also plays to their strengths:
@@ -208,7 +211,8 @@ tools/smoke_test.sh path/to/godot
 
 Runs headless (no window): imports the project, checks that every sound the game
 asks for exists, plays a full 3v3 bot match on every home at top speed (checking the
-phase sounds and music fire), checks the walls' rules (`tests/walls_test.gd`), then plays a real host + client network match over
+phase sounds and music fire), checks the walls' rules (`tests/walls_test.gd`) and the cleanup's (`tests/chores_test.gd`: who owns
+what, work rates, the two-helper rule, repair steps and each character's own way of cleaning), then plays a real host + client network match over
 localhost and checks that both machines agree on the map and the result. Two
 scripted tests run too: `tests/couch_test.gd` (shared screen, with fake Joy-Cons) and
 `tests/melee_test.gd` (every character's close-up move, and what each one does). Takes
@@ -217,6 +221,7 @@ checks run on GitHub for every push (`.github/workflows/smoke-test.yml`).
 
 The game also takes launch options after `--`, which the tests use:
 `--practice`, `--host`, `--join=IP`, `--map=studio`, `--bots=N`, `--char=willow`, `--autostart=N`,
-`--autopilot`, `--war=SECONDS`, `--cleanup=SECONDS`, `--quit-after=SECONDS`,
+`--autopilot`, `--war=SECONDS`, `--cleanup=SECONDS`, `--captures=N`, `--quit-after=SECONDS`,
+`--generic_bots=N` (the first N bots ignore their specialty, to measure how much it matters),
 `--screenshot=PATH@SECONDS`, `--mute`, `--audio-log` (prints every sound as it plays). For example, `godot --path game -- --practice --bots=5 --autostart=1`
 drops you straight into a 3v3 match.

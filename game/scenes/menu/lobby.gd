@@ -255,10 +255,14 @@ func _show_detail(id: String) -> void:
 	var sp: Dictionary = c["special"]
 	var g: Dictionary = c["gag"]
 	var m: Dictionary = c["melee"]
-	_detail.text = "%s the %s (%s): %s\nWeapon: %s   ·   Up close: %s   ·   Special: %s   ·   HP %d   ·   Speed %d\nGag: %s. %s\n+ %s\n- %s\nCleanup: %s" % [
+	var chore := Chores.owned_by(id)
+	var walls := " (Big Bone)" if id == "pepper" else ""
+	var breaker := "" if not (id in ["biscuit", "butler", "claw", "pepper"]) else "   ·   Breaks walls%s" % walls
+	_detail.text = "%s the %s (%s): %s\nWeapon: %s   ·   Up close: %s   ·   Special: %s   ·   HP %d   ·   Speed %d%s\nGag: %s. %s\n+ %s\n- %s\nCleanup: %s %s." % [
 		c["name"], c["species"], c["role"], c["blurb"],
-		c["weapon"]["name"], m["name"], sp["name"], c["hp"], c["speed"],
-		g["name"], g["blurb"], c["strength"], c["weakness"], c["tidy_note"]]
+		c["weapon"]["name"], m["name"], sp["name"], c["hp"], c["speed"], breaker,
+		g["name"], g["blurb"], c["strength"], c["weakness"], Chores.VERB.get(chore, ""),
+		String(c["tidy_note"]).replace("{interact}", "interact")]
 
 
 func _row_order(id: int) -> int:

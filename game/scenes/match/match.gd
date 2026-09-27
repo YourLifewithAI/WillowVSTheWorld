@@ -5,6 +5,9 @@ extends Control
 ##   COUNTDOWN -> WAR (capture the remote) -> WHISTLE (car in the driveway!)
 ##   -> CLEANUP (everyone tidies together) -> RESULTS (the parents' verdict)
 ##
+## Cleanup is by specialty (see Chores): every job belongs to one character,
+## who does it properly; anyone else helps at a fifth of the speed.
+##
 ## The host is the referee: it owns the phase clock, the score, health, the
 ## remote and every knocked-over item, and broadcasts changes with the `_cl_*`
 ## RPCs. Clients report what they did through the `_srv_*` RPCs; the host
@@ -27,8 +30,12 @@ const CHANNEL_TIME := 2.0
 const AMBUSH_MULT := 2.0
 ## Knockback above this flips a character with the "flips" weakness.
 const FLIP_KNOCK := 220.0
-## Most scorch marks, splats and tufts of fur allowed at once.
-const MAX_DEBRIS := 90
+## Most bits of floor mess allowed at once (after that, piles just grow).
+const MAX_DEBRIS := 140
+## Floor pixels in one tile.
+const TILE := 22.63
+## How a bit of floor mess got cleaned (for the effect everyone sees).
+enum How { HELPED, OWNER, VACUUM, SWAT, THUMP }
 ## Bots knock through at most this many walls per team per war.
 const MAX_BREACHES := 2
 
@@ -55,7 +62,15 @@ var live := false
 var remote: TVRemote
 var debris: Dictionary = {}  # id -> Debris
 var mess_baseline := 0.0
-var stats: Dictionary = {}  # pid -> {"bonks", "caps", "fixes"}
+## pid -> {"bonks", "caps", "tidied" (weight of mess cleared), "own" (own-chore jobs done)}
+var stats: Dictionary = {}
+## Cleanup (see Chores), mirrored from the host: pid -> the chore that player
+## owns (their character's, or, if someone else picked the same character
+## first, one that nobody playing owns); chore -> the pids who own it and are
+## cleaning; chore -> owners who've wandered off (their jobs are anyone's).
+var specialty: Dictionary = {}
+var chore_owners: Dictionary = {}
+var idle_owners: Dictionary = {}
 var results: Dictionary = {}
 var clouds: Array[LitterCloud] = []
 var _scan_until: Dictionary = {}  # team -> time
@@ -71,6 +86,20 @@ var _remote_sync_t := 0.0
 var _progress_sync_t := 0.0
 var _debris_sync_t := 0.0
 var _plaster_t: Dictionary = {}  # wall panel index -> when it last shed plaster
+var _pictures: Dictionary = {}  # wall panel index -> Array of MessItems hanging on it
+var _last_work: Dictionary = {}  # pid -> when they last made cleanup progress
+var _idle_time: Dictionary = {}  # pid -> seconds spent idle this cleanup
+var _prev_pos: Dictionary = {}  # pid -> where they were last tick (drive-overs sweep the whole step)
+var _swat_cd: Dictionary = {}  # Willow pid -> seconds until the next swat
+var _thump_cd: Dictionary = {}  # Bass pid -> seconds until the next THUMP
+var _carried: Dictionary = {}  # Pepper pid -> MessItem he's carrying home
+var _worked: Dictionary = {}  # jobs someone worked last tick
+var _credit: Dictionary = {}  # job -> {pid: work done on it}
+var _chore_log: Dictionary = {}  # chore -> {"done", "owner", "other"} weight cleared
+## Game seconds, for who's been idle (host; stops while the game is paused).
+var work_clock := 0.0
+## Host: which bot is heading for which job (see BotBrain._cleanup).
+var claims: Dictionary = {}
 ## Walls each team has knocked through this war (host; bots stop at MAX_BREACHES).
 var breaches: Array[int] = [0, 0]
 var _load_timeout := 8.0
@@ -101,6 +130,9 @@ func _ready() -> void:
 		war_time = float(Net.options["war"])
 	if Net.options.has("cleanup"):
 		cleanup_time = float(Net.options["cleanup"])
+	if Net.options.has("captures"):
+		capture_limit = int(Net.options["captures"])
+	_hang_pictures()
 	_spawn_players()
 	remote = TVRemote.new()
 	remote.name = "Remote"
@@ -137,7 +169,7 @@ func _spawn_players() -> void:
 		p.position = level.bases[p.team].spawn_point(slots[p.team], team_sizes[p.team])
 		slots[p.team] += 1
 		players[id] = p
-		stats[id] = {"bonks": 0, "caps": 0, "fixes": 0}
+		stats[id] = {"bonks": 0, "caps": 0, "tidied": 0.0, "own": 0}
 		if p.is_bot and multiplayer.is_server():
 			p.brain = BotBrain.new(p, self)
 		elif not p.is_bot and int(info.get("owner", id)) == Net.my_id():
@@ -293,11 +325,16 @@ func _on_phase_entered() -> void:
 			Audio.play("whistle")
 			Audio.music("war")
 		Phase.WHISTLE:
-			hud.banner("CAR IN THE DRIVEWAY!", "Truce! Hide the evidence!")
+			hud.banner("CAR IN THE DRIVEWAY!", "Truce! Everyone to their job!")
 			for p: Player in players.values():
 				p.reset_for_phase()
 			Audio.music("", 0.3)
 			Audio.play("car_horn")
+			# Everyone on this screen: your face and your job. And which room is which.
+			for p in local_players():
+				ChoreBubble.show_for(p, my_chore(p), time_left + 1.5)
+			for r in level.rooms:
+				Fx.text(level.entities, Iso.tile_to_local(r.area.get_center()), r.room_name.to_upper(), Color("fff4e3"))
 		Phase.CLEANUP:
 			hud.banner("CLEAN UP!", "Fix everything before they walk in")
 			Audio.play("whistle")
@@ -328,6 +365,7 @@ func _physics_process(delta: float) -> void:
 	_tick_clock()
 	if not multiplayer.is_server():
 		return
+	work_clock += delta
 
 	match phase:
 		Phase.LOADING:
@@ -341,7 +379,6 @@ func _physics_process(delta: float) -> void:
 			_tick_remote(delta)
 			_tick_ko(delta)
 			_tick_knockovers()
-			_tick_debris(delta)
 			_tick_gags(delta)
 			_tick_navigation(delta)
 			if time_left <= 0.0 or scores.max() >= capture_limit:
@@ -351,8 +388,7 @@ func _physics_process(delta: float) -> void:
 				_begin_cleanup()
 		Phase.CLEANUP:
 			_tick_remote(delta)
-			_tick_cleanup(delta)
-			_tick_debris(delta)
+			_tick_jobs(delta)
 			_tick_navigation(delta)
 			if time_left <= 0.0 or mess_remaining() <= 0.0:
 				_finish()
@@ -375,7 +411,9 @@ func _end_war() -> void:
 	_vortices.clear()
 	_strikes.clear()
 	var winner := _winning_team()
-	_set_phase(Phase.WHISTLE, whistle_time)
+	_assign_chores()
+	# The first cleanup of the evening gets a little longer to read the jobs.
+	_set_phase(Phase.WHISTLE, whistle_time + (2.0 if Net.matches_played == 0 else 0.0))
 	_ko_timers.clear()
 	_cl_tv.rpc(winner)
 	log_event("war over %d-%d" % [scores[0], scores[1]])
@@ -386,10 +424,32 @@ func _begin_cleanup() -> void:
 	_cl_baseline.rpc(mess_baseline)
 	var knocked := level.mess_items.filter(func(i: MessItem) -> bool: return i.knocked).size()
 	log_event("cleanup starts: mess=%.1f (%d items knocked, %d debris)" % [mess_baseline, knocked, debris.size()])
+	var kinds := {}
+	for d: Debris in debris.values():
+		kinds[d.kind] = int(kinds.get(d.kind, 0)) + 1
+	log_event("  debris by kind %s" % str(kinds))
+	var totals := chore_totals()
+	for c: int in totals:
+		log_event("  chore %s: %d jobs, weight %.1f, owner %s" % [Chores.Chore.keys()[c], totals[c][0], totals[c][1],
+			_owner_names(c)])
+	var now := work_clock
+	for pid: int in players:
+		_last_work[pid] = now
+		_prev_pos[pid] = players[pid].position
 	_set_phase(Phase.CLEANUP, cleanup_time)
 
 
 func _finish() -> void:
+	var left := chore_totals()
+	for c: int in Chores.Chore.values():
+		var done: Dictionary = _chore_log.get(c, {})
+		if done.is_empty() and not left.has(c):
+			continue
+		log_event("  chore %s: done %d (owner %.1f, others %.1f), left %d (%.1f)" % [Chores.Chore.keys()[c],
+			done.get("done", 0), done.get("owner", 0.0), done.get("other", 0.0), left.get(c, [0, 0.0])[0], left.get(c, [0, 0.0])[1]])
+	for pid: int in players:
+		log_event("  %s (%s): tidied %.1f, %d own jobs, idle %.0f s" % [players[pid].display_name,
+			Chores.Chore.keys()[specialty.get(pid, 0)], stats[pid]["tidied"], stats[pid]["own"], _idle_time.get(pid, 0.0)])
 	var remaining := mess_remaining()
 	var tidy := 1.0 if mess_baseline <= 0.0 else clampf(1.0 - remaining / mess_baseline, 0.0, 1.0)
 	var verdict := Verdict.GROUNDED
@@ -437,16 +497,31 @@ func _cl_results(final_scores: Array, tidy: float, verdict: int, winner: int, fi
 ## Total weight of everything still out of place (0 = spotless).
 func mess_remaining() -> float:
 	var m := 0.0
+	for totals: Array in chore_totals().values():
+		m += totals[1]
+	return m
+
+
+## Everything still to do, by chore: {chore: [jobs, weight]}. A repair chain
+## counts all its steps still to come, so owners can see work on its way.
+func chore_totals() -> Dictionary:
+	var out := {}
+	var add := func(c: int, w: float) -> void:
+		var t: Array = out.get_or_add(c, [0, 0.0])
+		t[0] += 1
+		t[1] += w
+	for d: Debris in debris.values():
+		add.call(d.chore, d.weight)
 	for item in level.mess_items:
 		if item.knocked:
-			m += item.weight()
+			add.call(item.chore(), item.weight())
 	for f in level.furniture:
-		if f.wrecked:
-			m += f.weight()
-	m += debris.size() * 0.5
+		var c := f.chain()
+		for k in range(f.step, c.size()):
+			add.call(c[k], f.step_weight(c[k]))
 	if remote.state != TVRemote.State.HOME:
-		m += 1.0
-	return m
+		add.call(Chores.Chore.REMOTE, 1.0)
+	return out
 
 
 func tidiness() -> float:
@@ -503,8 +578,8 @@ func _tick_remote(delta: float) -> void:
 		var best: Player = null
 		var best_d := PICKUP_RADIUS
 		for p: Player in players.values():
-			if p.is_ko or p.captured_by != 0 or (p.pid == r.thrower and r.grace > 0.0):
-				continue
+			if p.is_ko or p.captured_by != 0 or (p.pid == r.thrower and r.grace > 0.0) or _carried.has(p.pid):
+				continue  # (Pepper can't hold the remote and something else in his mouth.)
 			var d := Iso.fdist(p.position, r.position)
 			if d < best_d and level.wall_between(p.position, r.position).is_empty():
 				best = p
@@ -541,7 +616,8 @@ func _score(c: Player) -> void:
 
 func _return_remote(c: Player) -> void:
 	_reset_remote()
-	stats[c.pid]["fixes"] += 1
+	stats[c.pid]["tidied"] += 1.0
+	_last_work[c.pid] = work_clock
 	_cl_event.rpc("%s put the remote back!" % c.display_name, Color("8ff0a4"))
 
 
@@ -793,8 +869,9 @@ func _srv_mess_hit(idx: int, force: float, dir: Vector2) -> void:
 	if idx < 0 or idx >= level.mess_items.size():
 		return
 	var item := level.mess_items[idx]
-	if item.can_be_knocked_by(minf(force, 400.0)):
-		_knock(item, dir)
+	force = minf(force, 400.0)
+	if item.can_be_knocked_by(force):
+		_knock(item, dir, force)
 
 
 ## Players who get knocked flying (or dash) into things knock them over.
@@ -807,76 +884,587 @@ func _tick_knockovers() -> void:
 		for item in level.mess_items:
 			if not item.knocked and Iso.fdist(p.position, item.position) <= 12.0 and item.can_be_knocked_by(force) \
 					and level.wall_between(p.position, item.position).is_empty():
-				_knock(item, Iso.to_floor(item.position - p.position))
+				_knock(item, Iso.to_floor(item.position - p.position), force)
 
 
-func _knock(item: MessItem, dir: Vector2) -> void:
+## Knocks a thing over. A hard hit flings a light thing 2-4 tiles (a stray,
+## for Pepper to carry home); whatever was in it spills out on the floor.
+func _knock(item: MessItem, dir: Vector2, force: float = 0.0) -> void:
 	var d := dir.normalized() if dir.length() > 0.01 else Vector2.RIGHT
-	var target := level.clip(item.home, level.clamp_to_floor(item.home + Iso.to_screen(d * 16.0), 0.6))
-	_cl_mess_state.rpc(item.index, true, target - item.home)
+	var fling := 16.0
+	if item.high:
+		fling = 6.0  # it just drops off the wall (or the counter)
+	elif force >= MessItem.HEAVY_FORCE and not item.heavy:
+		fling = randf_range(2.0, 4.0) * TILE
+	var target := level.clip(item.home, level.clamp_to_floor(item.home + Iso.to_screen(d * fling), 0.6))
+	if not item.high:
+		# Where someone can get at it (not on top of the couch).
+		var reach := level.walkable(target)
+		if level.wall_between(target, reach).is_empty():
+			target = reach
+	_cl_mess_state.rpc(item.index, true, target - item.home, 0)
+	var spills: Array = Chores.SPILLS.get(item.spill_sprite, Chores.SPILLS.get(item.sprite_name, []))
+	spills = spills + Chores.SCATTERS.get(item.sprite_name, [])
+	for kind: String in spills:
+		var at := item.home + Iso.to_screen(d.rotated(randf_range(-0.9, 0.9)) * randf_range(8.0, 18.0))
+		_spawn_debris(kind, level.clip(item.home, at))
 
 
 @rpc("authority", "call_local", "reliable")
-func _cl_mess_state(idx: int, knocked: bool, offset: Vector2) -> void:
+func _cl_mess_state(idx: int, knocked: bool, offset: Vector2, carrier: int) -> void:
 	var item := level.mess_items[idx]
 	var was_knocked := item.knocked
-	item.apply_state(knocked, offset, 0.0, 0)
-	if knocked:
+	var was_carried := item.carrier != 0
+	item.apply_state(knocked, offset, 0.0, 0, carrier)
+	if knocked and not was_knocked:
 		log_event("knocked %s" % item.name)
-	if knocked != was_knocked:
+	if carrier != 0 and not was_carried:
+		Audio.play_at("c_fetch", level.entities, item.position)
+	elif knocked != was_knocked:
 		Audio.play_at("knock" if knocked else "tidy", level.entities, item.position)
 
 
 @rpc("authority", "call_local", "unreliable_ordered")
-func _cl_mess_progress(idx: int, progress: float, helpers: int) -> void:
+func _cl_mess_progress(idx: int, progress: float, helpers: int, owner_on: bool) -> void:
 	var item := level.mess_items[idx]
 	if item.knocked:
-		item.apply_state(true, item.offset, progress, helpers)
+		item.owner_working = owner_on
+		item.apply_state(true, item.offset, progress, helpers, item.carrier)
 
 
-## How fast this character tidies right now (Bass's playlist speeds up everyone near it).
-func _tidy_power(p: Player) -> float:
-	var power := float(p.data["tidy"])
-	for q: Player in players.values():
-		if q.data.get("playlist", false) and Iso.fdist(q.position, p.position) <= 80.0:
-			return power * 1.3
-	return power
+## Pictures hang on the nearest wall panel: any hit to that panel knocks them down.
+func _hang_pictures() -> void:
+	for item in level.mess_items:
+		if item.hang <= 0.0:
+			continue
+		var best: WallPanel = null
+		var best_d := 14.0
+		for panel in level.wall_panels:
+			var dist := panel.distance_to(item.home)
+			if dist < best_d:
+				best = panel
+				best_d = dist
+		if best:
+			_pictures.get_or_add(best.index, []).append(item)
+			item.wall_dir = Vector2(1, -0.5) if best.run.plane == WallRun.Axis.I else Vector2(1, 0.5)
+			item.queue_redraw()
 
 
-## Handy and strong characters count as two pairs of hands.
-func _lift(p: Player) -> int:
-	return 2 if p.data.get("strong", false) or p.data.get("handy", false) else 1
+func _drop_pictures(panel: WallPanel, dir: Vector2) -> void:
+	for item: MessItem in _pictures.get(panel.index, []):
+		if not item.knocked:
+			_knock(item, dir)
 
 
-func _tick_cleanup(delta: float) -> void:
+# ================================================================= cleanup
+
+## Who owns what this cleanup (host, at the whistle). Everyone owns their
+## character's chore. Someone whose character was already picked takes the
+## biggest chore nobody playing owns instead (or shares their own, if there's none).
+func _assign_chores() -> void:
+	specialty.clear()
+	var totals := chore_totals()
+	var ids: Array = players.keys()
+	ids.sort()
+	var taken := {}
+	var spare: Array[int] = []
+	for pid: int in ids:
+		var c := Chores.owned_by(players[pid].char_id)
+		if c == Chores.Chore.NONE:
+			continue
+		if taken.has(c):
+			spare.append(pid)
+		else:
+			specialty[pid] = c
+			taken[c] = true
+	for pid in spare:
+		var best := Chores.owned_by(players[pid].char_id)
+		var best_w := 0.0
+		for c: int in Chores.OWNER:
+			var w: float = totals.get(c, [0, 0.0])[1]
+			if not taken.has(c) and w > best_w:
+				best = c
+				best_w = w
+		specialty[pid] = best
+		taken[best] = true
+	var now := work_clock
+	for pid: int in players:
+		_last_work[pid] = now
+	_update_owners(true)
+
+
+## Owners who haven't got anything done for a while stop counting: their
+## chore becomes everyone's until they get back to it.
+func _update_owners(force: bool = false) -> void:
+	var now := work_clock
+	var owners := {}
+	var idle := {}
+	for pid: int in specialty:
+		if not players.has(pid):
+			continue
+		var busy := now - float(_last_work.get(pid, now)) < Chores.IDLE_TIME
+		(owners if busy else idle).get_or_add(specialty[pid], []).append(pid)
+	if force or owners != chore_owners or idle != idle_owners:
+		_cl_chores.rpc(owners, idle, specialty)
+
+
+@rpc("authority", "call_local", "reliable")
+func _cl_chores(owners: Dictionary, idle: Dictionary, spec: Dictionary) -> void:
+	chore_owners = owners
+	idle_owners = idle
+	specialty = spec
+	if phase == Phase.CLEANUP:
+		log_event("chores %s idle %s" % [str(owners), str(idle)])
+	hud.on_chores_changed()
+
+
+## The owner(s) of a chore, for the logs.
+func _owner_names(c: int) -> String:
+	var names: Array[String] = []
+	for pid: int in specialty:
+		if specialty[pid] == c and players.has(pid):
+			names.append(players[pid].display_name)
+	return ", ".join(names) if not names.is_empty() else "nobody"
+
+
+## How many jobs are left in each room (for the parents' verdict), most first.
+func leftovers_by_room() -> Dictionary:
+	var counts := {}
+	var add := func(pos: Vector2) -> void:
+		var r := level.room_at(pos)
+		var n := r.room_name if r else "Hallway"
+		counts[n] = int(counts.get(n, 0)) + 1
+	for d: Debris in debris.values():
+		add.call(d.position)
+	for item in level.mess_items:
+		if item.knocked:
+			add.call(item.position)
+	for f in level.furniture:
+		if f.current_chore() != Chores.Chore.NONE:
+			add.call(f.position)
+	var names := counts.keys()
+	names.sort_custom(func(a: String, b: String) -> bool: return counts[a] > counts[b])
+	var out := {}
+	for n: String in names:
+		out[n] = counts[n]
+	return out
+
+
+## The face on a chore's jobs: whoever owns it now, or the grey hand.
+func chore_face(c: int) -> String:
+	var owners: Array = chore_owners.get(c, [])
+	if owners.is_empty() or not players.has(owners[0]):
+		return "face_anyone"
+	return "face_" + String(players[owners[0]].char_id)
+
+
+## The seat colours of the people on this screen who own a chore (for job badges).
+func local_owner_colors(c: int) -> Array[Color]:
+	var out: Array[Color] = []
+	for pid: int in chore_owners.get(c, []):
+		var p: Player = players.get(pid)
+		if p and p.seat >= 0:
+			out.append(Seats.color(p.seat) if shared_screen() else Color("8ff0a4"))
+	return out
+
+
+## The chore `p` owns (Chores.Chore.NONE for none).
+func my_chore(p: Player) -> int:
+	return specialty.get(p.pid, Chores.Chore.NONE)
+
+
+func _tick_jobs(delta: float) -> void:
 	_progress_sync_t += delta
 	var send := _progress_sync_t >= 0.1
 	if send:
 		_progress_sync_t = 0.0
-	for f in level.furniture:
-		if f.wrecked:
-			_tick_rebuild(f, delta, send)
+	_tick_owner_moves(delta)
+	# Everyone holding interact works the one job nearest them (their own chore first).
+	var crews := {}
+	for p: Player in players.values():
+		if p.interacting and not p.is_ko and p.captured_by == 0:
+			var job := _job_for(p)
+			if job:
+				crews.get_or_add(job, []).append(p)
+	for job in _worked:  # (floor mess cleaned last tick is freed by now)
+		if is_instance_valid(job) and not crews.has(job):
+			_set_progress(job, progress_of(job), 0, false, true)
+	_worked = {}
+	for job: Object in crews:
+		_worked[job] = true
+		_work(job, crews[job], delta, send)
+	for pid: int in specialty:
+		if pid in idle_owners.get(specialty[pid], []):
+			_idle_time[pid] = float(_idle_time.get(pid, 0.0)) + delta
+	_update_owners()
+
+
+## Can `p` reach something at `at` from where they stand (no wall in between,
+## except `own`: the wall panel being worked on)?
+func _reachable(p: Player, at: Vector2, own: Furniture = null) -> bool:
+	var hit := level.wall_between(p.position, at)
+	return hit.is_empty() or hit["panel"] == own
+
+
+## The job `p` works on while holding interact, or null: the one their bot
+## brain picked, or else the nearest (their own chore first).
+func _job_for(p: Player) -> Object:
+	var focus = p.focus_job
+	if is_open(focus) and in_reach(p, focus) and _reachable(p, (focus as Node2D).position, focus as Furniture):
+		return focus
+	var mine := my_chore(p)
+	var best: Object = null
+	var best_score := INF
+	for d: Debris in debris.values():
+		var dist := Iso.fdist(p.position, d.position)
+		var score := dist + (0.0 if d.chore == mine else 100.0)
+		if dist <= DEBRIS_RADIUS and score < best_score and _reachable(p, d.position):
+			best = d
+			best_score = score
 	for item in level.mess_items:
-		if not item.knocked:
+		if not item.knocked or item.carrier != 0:
 			continue
-		var lift := 0
-		var power := 0.0
-		var fixers: Array[Player] = []
-		for p: Player in players.values():
-			if p.interacting and Iso.fdist(p.position, item.position) <= FIX_RADIUS:
-				lift += _lift(p)
-				power += _tidy_power(p)
-				fixers.append(p)
-		if lift >= item.required_lift():
-			item.progress += delta * power / item.fix_time()
-		item.helpers = lift
-		if item.progress >= 1.0:
-			for f in fixers:
-				stats[f.pid]["fixes"] += 1
-			_cl_mess_state.rpc(item.index, false, Vector2.ZERO)
-			_cl_event.rpc("%s fixed the %s!" % [fixers[0].display_name, item.sprite_name.replace("_teal", "")], Color("8ff0a4"))
-		elif send:
-			_cl_mess_progress.rpc(item.index, item.progress, lift)
+		var dist := Iso.fdist(p.position, item.position)
+		var score := dist + (0.0 if item.chore() == mine else 100.0)
+		if dist <= FIX_RADIUS and score < best_score and _reachable(p, item.position):
+			best = item
+			best_score = score
+	for f in level.furniture:
+		var c := f.current_chore()
+		if c == Chores.Chore.NONE:
+			continue
+		var dist := f.distance_to(p.position)
+		var score := maxf(dist, 0.0) + (0.0 if c == mine else 100.0)
+		if dist <= FIX_RADIUS and score < best_score and _reachable(p, f.position, f):
+			best = f
+			best_score = score
+	return best
+
+
+## Every job still to do right now (floor mess, knocked-over things, furniture
+## and walls on their current repair step).
+func open_jobs() -> Array[Object]:
+	var out: Array[Object] = []
+	out.append_array(debris.values())
+	for item in level.mess_items:
+		if item.knocked and item.carrier == 0:
+			out.append(item)
+	for f in level.furniture:
+		if f.current_chore() != Chores.Chore.NONE:
+			out.append(f)
+	return out
+
+
+## Is this job still waiting to be done? (Floor mess may have been freed already.)
+func is_open(job) -> bool:
+	if not is_instance_valid(job):
+		return false
+	if job is Debris:
+		return debris.has(job.debris_id)
+	if job is MessItem:
+		return job.knocked and job.carrier == 0
+	return (job as Furniture).current_chore() != Chores.Chore.NONE
+
+
+## Where the little arrow on a local player's ring points in cleanup: their
+## nearest job, or once those are all done, the nearest job anyone can do (or
+## a two-hand job with one helper already waiting). {"at", "own"}, or {} for none.
+func pointer_for(p: Player) -> Dictionary:
+	var mine := my_chore(p)
+	var best := {}
+	var best_d := INF
+	var other := {}
+	var other_d := INF
+	for job in open_jobs():
+		var c := chore_of(job)
+		var at: Vector2 = (job as Node2D).position
+		var d := Iso.fdist(p.position, at)
+		if c == mine:
+			if d < best_d:
+				best = {"at": at, "own": true}
+				best_d = d
+		elif d < other_d and (chore_owners.get(c, []).is_empty()
+				or (Chores.needs_two(c, chore_owners) and int(job.get("helpers")) == 1)):
+			other = {"at": at, "own": false}
+			other_d = d
+	return best if not best.is_empty() else other
+
+
+## Is `p` close enough to work on `job` (holding interact)?
+func in_reach(p: Player, job: Object) -> bool:
+	if job is Debris:
+		return Iso.fdist(p.position, job.position) <= DEBRIS_RADIUS
+	if job is MessItem:
+		return Iso.fdist(p.position, job.position) <= FIX_RADIUS
+	return (job as Furniture).distance_to(p.position) <= FIX_RADIUS
+
+
+## Does this owner clean their chore their own way (driving over it, running
+## into it, THUMPing), rather than holding interact at each job?
+func has_owner_move(p: Player) -> bool:
+	var c := my_chore(p)
+	return c == Chores.owned_by(p.char_id) and c in [Chores.Chore.FLOOR, Chores.Chore.CLUTTER, Chores.Chore.FETCH, Chores.Chore.STAIN]
+
+
+## What Pepper is carrying home in his mouth (host), or null.
+func carried_by(p: Player) -> MessItem:
+	return _carried.get(p.pid)
+
+
+func chore_of(job: Object) -> int:
+	if job is Debris:
+		return job.chore
+	if job is MessItem:
+		return job.chore()
+	return (job as Furniture).current_chore()
+
+
+func progress_of(job: Object) -> float:
+	if job is Debris:
+		return job.progress
+	if job is MessItem:
+		return job.progress
+	return (job as Furniture).rebuild
+
+
+## Seconds of work (at rate 1) and tidiness weight of a job.
+func time_of(job: Object) -> float:
+	if job is Debris:
+		return job.clean_time
+	if job is MessItem:
+		return job.job_time()
+	var f := job as Furniture
+	return f.step_time(f.current_chore())
+
+
+func weight_of(job: Object) -> float:
+	if job is Debris:
+		return job.weight
+	if job is MessItem:
+		return job.weight()
+	var f := job as Furniture
+	return f.step_weight(f.current_chore())
+
+
+## Bass's Cleaning Playlist: everyone near him works a little faster.
+func _playlist(p: Player) -> float:
+	for q: Player in players.values():
+		if q.data.get("playlist", false) and not q.is_ko and Iso.fdist(q.position, p.position) <= Chores.PLAYLIST_RADIUS:
+			return Chores.PLAYLIST_RATE
+	return 1.0
+
+
+func _work(job: Object, crew: Array, delta: float, send: bool) -> void:
+	var c := chore_of(job)
+	var owner_on := false
+	var helpers := 0
+	var rates := {}
+	var rate := 0.0
+	for p: Player in crew:
+		var own := my_chore(p) == c
+		owner_on = owner_on or own
+		helpers += 0 if own else 1
+		rates[p.pid] = Chores.rate(own, c, chore_owners) * _playlist(p)
+		rate += rates[p.pid]
+	# Heavy and high jobs need two pairs of helping hands while their owner's about.
+	if not owner_on and helpers < 2 and Chores.needs_two(c, chore_owners):
+		rate = 0.0
+	var progress := progress_of(job)
+	if rate > 0.0:
+		progress += delta * rate / time_of(job)
+		var credit: Dictionary = _credit.get_or_add(job, {})
+		for pid: int in rates:
+			credit[pid] = float(credit.get(pid, 0.0)) + rates[pid] * delta
+	if progress >= 1.0:
+		_finish_job(job, owner_on, helpers, send)
+	else:
+		_set_progress(job, progress, helpers, owner_on, send)
+
+
+func _set_progress(job: Object, progress: float, helpers: int, owner_on: bool, send: bool) -> void:
+	if job is Debris:
+		job.progress = progress
+		if send:
+			_cl_debris_progress.rpc(job.debris_id, progress, owner_on)
+	elif job is MessItem:
+		job.progress = progress
+		job.helpers = helpers
+		if send:
+			_cl_mess_progress.rpc(job.index, progress, helpers, owner_on)
+	else:
+		var f := job as Furniture
+		f.rebuild = progress
+		f.helpers = helpers
+		if send:
+			_cl_furniture_progress.rpc(f.index, progress, helpers, owner_on)
+
+
+func _finish_job(job: Object, owner_on: bool, helpers: int, send: bool) -> void:
+	# A mended wall only turns solid again once nobody is standing in the gap.
+	if job is WallPanel and job.wrecked and _body_in(job):
+		_set_progress(job, 1.0, helpers, owner_on, send)
+		return
+	var c := chore_of(job)
+	_give_credit(c, weight_of(job), _credit.get(job, {}))
+	_credit.erase(job)
+	if job is Debris:
+		_cl_debris_remove.rpc(job.debris_id, How.OWNER if owner_on else How.HELPED)
+	elif job is MessItem:
+		_cl_mess_state.rpc(job.index, false, Vector2.ZERO, 0)
+	else:
+		_next_step(job as Furniture)
+
+
+## Moves a piece of furniture on to the next step of its repair (see
+## Furniture.chain): a wreck stood back up, a new wall panel in, or good as new.
+func _next_step(f: Furniture) -> void:
+	var chain := f.chain()
+	if f is WallPanel and f.wrecked:
+		_cl_furniture_state.rpc(f.index, 1.0, false, 0.0, 0, 1)
+	elif f.step + 1 < chain.size():
+		_cl_furniture_state.rpc(f.index, f.hp / f.max_hp, f.wrecked, 0.0, 0, f.step + 1)
+	else:
+		_cl_furniture_state.rpc(f.index, 1.0, false, 0.0, 0, 0)
+		if chain.size() > 1:
+			_cl_event.rpc("The %s is good as new!" % _furniture_name(f), Color("8ff0a4"))
+
+
+## Shares out the credit for a finished job by how much each person did.
+func _give_credit(c: int, weight: float, shares: Dictionary) -> void:
+	var total := 0.0
+	for pid: int in shares:
+		total += shares[pid]
+	var entry: Dictionary = _chore_log.get_or_add(c, {"done": 0, "owner": 0.0, "other": 0.0})
+	entry["done"] += 1
+	var now := work_clock
+	for pid: int in shares:
+		var part: float = weight * shares[pid] / total if total > 0.0 else weight
+		var own: bool = specialty.get(pid, Chores.Chore.NONE) == c
+		entry["owner" if own else "other"] += part
+		if stats.has(pid):
+			stats[pid]["tidied"] += part
+			if own and part >= weight * 0.5:
+				stats[pid]["own"] += 1
+		_last_work[pid] = now
+
+
+# ============================================================ owner moves
+
+## The things only the owner can do, without pressing anything (Zoomba,
+## Willow, Pepper) or with one button for a whole area (Bass). Moves are
+## checked along the whole step since last tick, so nothing gets skipped.
+func _tick_owner_moves(delta: float) -> void:
+	for pid: int in _carried.keys():
+		if not players.has(pid):
+			_drop_carried(pid, _carried[pid].position)
+	for p: Player in players.values():
+		var from: Vector2 = _prev_pos.get(p.pid, p.position)
+		_prev_pos[p.pid] = p.position
+		if p.is_ko or p.captured_by != 0:
+			continue
+		var c := my_chore(p)
+		if c == Chores.Chore.NONE or c != Chores.owned_by(p.char_id):
+			continue  # spare hands hold interact, like everyone else
+		match c:
+			Chores.Chore.FLOOR:
+				_vacuum(p, from)
+			Chores.Chore.CLUTTER:
+				_swat(p, from, delta)
+			Chores.Chore.FETCH:
+				_fetch(p, from)
+			Chores.Chore.STAIN:
+				_thump(p, delta)
+
+
+## Zoomba hoovers up floor mess just by driving over it.
+func _vacuum(p: Player, from: Vector2) -> void:
+	for d: Debris in debris.values():
+		if d.chore == Chores.Chore.FLOOR and Iso.segment_fdist(d.position, from, p.position) <= Chores.VACUUM_RADIUS \
+				and _reachable(p, d.position):
+			_clear_debris(d, How.VACUUM, p)
+
+
+## Willow runs over clutter and bats it under the nearest couch.
+func _swat(p: Player, from: Vector2, delta: float) -> void:
+	_swat_cd[p.pid] = maxf(0.0, float(_swat_cd.get(p.pid, 0.0)) - delta)
+	if _swat_cd[p.pid] > 0.0:
+		return
+	var best: Debris = null
+	var best_d := Chores.SWAT_RADIUS
+	for d: Debris in debris.values():
+		var dist := Iso.segment_fdist(d.position, from, p.position)
+		if d.chore == Chores.Chore.CLUTTER and dist <= best_d and _reachable(p, d.position):
+			best = d
+			best_d = dist
+	if best:
+		_swat_cd[p.pid] = Chores.SWAT_TIME
+		_clear_debris(best, How.SWAT, p)
+
+
+## Pepper runs into knocked-over things: close to home, they pop straight back
+## up; further away, he carries them home in his mouth (and drops them in place).
+func _fetch(p: Player, from: Vector2) -> void:
+	if _carried.has(p.pid):
+		var held: MessItem = _carried[p.pid]
+		if Iso.fdist(p.position, held.home) <= Chores.DELIVER_RADIUS:
+			_carried.erase(p.pid)
+			_give_credit(Chores.Chore.FETCH, held.weight(), {p.pid: 1.0})
+			_cl_mess_state.rpc(held.index, false, Vector2.ZERO, 0)
+		return
+	if remote.state == TVRemote.State.CARRIED and remote.carrier_pid == p.pid:
+		return
+	for item in level.mess_items:
+		if not item.knocked or item.carrier != 0 or item.chore() != Chores.Chore.FETCH:
+			continue
+		if Iso.segment_fdist(item.position, from, p.position) > Chores.FETCH_RADIUS or not _reachable(p, item.position):
+			continue
+		if item.stray():
+			_carried[p.pid] = item
+			_last_work[p.pid] = work_clock
+			_cl_mess_state.rpc(item.index, true, item.offset, p.pid)
+		else:
+			_give_credit(Chores.Chore.FETCH, item.weight(), {p.pid: 1.0})
+			_cl_mess_state.rpc(item.index, false, Vector2.ZERO, 0)
+		return
+
+
+## Pepper went home with something in his mouth: it stays where he was.
+func _drop_carried(pid: int, at: Vector2) -> void:
+	var item: MessItem = _carried[pid]
+	_carried.erase(pid)
+	_cl_mess_state.rpc(item.index, true, level.clamp_to_floor(at) - item.home, 0)
+
+
+## Bass holds interact to THUMP: every stain nearby shakes loose, through walls.
+func _thump(p: Player, delta: float) -> void:
+	_thump_cd[p.pid] = maxf(0.0, float(_thump_cd.get(p.pid, 0.0)) - delta)
+	if not p.interacting or _thump_cd[p.pid] > 0.0:
+		return
+	var hit: Array[Debris] = []
+	for d: Debris in debris.values():
+		if d.chore == Chores.Chore.STAIN and Iso.fdist(d.position, p.position) <= Chores.THUMP_RADIUS:
+			hit.append(d)
+	if hit.is_empty():
+		return
+	_thump_cd[p.pid] = Chores.THUMP_TIME
+	_cl_pulse.rpc(p.pid)
+	for d in hit:
+		_clear_debris(d, How.THUMP, p)
+
+
+func _clear_debris(d: Debris, how: How, by: Player) -> void:
+	_credit.erase(d)
+	_give_credit(d.chore, d.weight, {by.pid: 1.0})
+	_cl_debris_remove.rpc(d.debris_id, how)
+
+
+@rpc("authority", "call_local", "unreliable")
+func _cl_pulse(pid: int) -> void:
+	var p: Player = players.get(pid)
+	if p == null:
+		return
+	Fx.ring(level.entities, p.position, Chores.THUMP_RADIUS, Color("7fe6ff"), false)
+	Audio.play_at("c_thump", level.entities, p.position)
 
 
 # ==================================================================== gags
@@ -916,8 +1504,8 @@ func _srv_gag(pid: int, point: Vector2) -> void:
 			var at := level.clamp_to_floor(point)
 			_cl_cloud.rpc(_next_cloud_id, at, float(g["cloud_radius"]), float(g["cloud_time"]), p.team)
 			_next_cloud_id += 1
-			for k in 3:
-				_spawn_debris("litter", at + Iso.to_screen(Vector2.from_angle(TAU * k / 3.0 + randf()) * 16.0))
+			for k in 2:
+				_spawn_debris("litter", at + Iso.to_screen(Vector2.from_angle(PI * k + randf()) * 16.0))
 		Roster.Gag.MEGA_SUCK:
 			_vortices[pid] = float(g["duration"])
 		Roster.Gag.SATELLITE:
@@ -997,7 +1585,7 @@ func _tick_gags(delta: float) -> void:
 				_apply_hit(p, t, g, Iso.to_floor(t.position - at).normalized())
 		for item in level.mess_items:
 			if not item.knocked and Iso.fdist(item.position, at) <= r + 6.0:
-				_knock(item, Iso.to_floor(item.position - at))
+				_knock(item, Iso.to_floor(item.position - at), 300.0)
 		for f in level.furniture:
 			if not f is WallPanel and f.can_be_damaged() and Iso.fdist(f.position, at) <= r + f.reach():
 				_damage_furniture(f, float(g["demolition"]), p)
@@ -1091,9 +1679,10 @@ func _cl_pull(tid: int, pull: Vector2) -> void:
 # =============================================================== furniture
 
 ## `by` hit `f` with ability `ability` (see Roster.ability), or -1: they were
-## knocked flying into it.
+## knocked flying into it. Walls hear about every hit, even ones too weak to
+## hurt them (they still knock the pictures down).
 func report_furniture_hit(f: Furniture, amount: float, by: Player, ability: int) -> void:
-	if amount <= 0.0 or not f.can_be_damaged() or phase != Phase.WAR:
+	if phase != Phase.WAR or (ability >= 0 and not f is WallPanel and (amount <= 0.0 or not f.can_be_damaged())):
 		return
 	if multiplayer.is_server():
 		_srv_furniture_hit(f.index, amount, by.pid, ability)
@@ -1113,26 +1702,57 @@ func _srv_furniture_hit(idx: int, amount: float, pid: int, ability: int) -> void
 	var f := level.furniture[idx]
 	if Iso.fdist(by.position, f.position) > 420.0:
 		return
+	if ability < 0:
+		_scuff(by.position)  # a crash leaves a mark on the floor
+	if f is WallPanel:
+		_drop_pictures(f, Iso.to_floor(f.position - by.position))
 	var most := Player.CRASH_DAMAGE if ability < 0 else float(Roster.ability(by.data, ability).get("demolition", 0.0))
 	_damage_furniture(f, clampf(amount, 0.0, most), by)
 
 
 func _damage_furniture(f: Furniture, amount: float, by: Player = null) -> void:
 	# Walls shrug off anything but the heavy hitters.
-	if not f.can_be_damaged() or amount < f.min_hit:
+	if not f.can_be_damaged() or amount <= 0.0 or amount < f.min_hit:
 		return
 	f.hp = maxf(0.0, f.hp - amount)
 	var now_wrecked := f.hp <= 0.0
-	_cl_furniture_state.rpc(f.index, f.hp / f.max_hp, now_wrecked, 0.0, 0)
+	_cl_furniture_state.rpc(f.index, f.hp / f.max_hp, now_wrecked, 0.0, 0, 0)
 	if f is WallPanel:
 		_wall_damaged(f, now_wrecked, by)
-	elif now_wrecked:
+		return
+	_shed(f, amount, by, now_wrecked)
+	if now_wrecked:
 		_spawn_debris("scorch", f.position)
+		_spawn_debris("crumbs", f.position + Iso.to_screen(Vector2(randf_range(-6, 6), 8)))
 		_cl_event.rpc("The %s is destroyed!" % _furniture_name(f), Color("ffb347"))
 
 
+## Knocking furniture about shakes things loose: books, toys and magazines off
+## hard pieces (Willow's to hide), pillows off soft ones (Biscuit's). One per
+## Chores.SHED_EVERY damage while its budget lasts; a wreck sheds the rest.
+## They land on the side the hit came from.
+func _shed(f: Furniture, amount: float, by: Player, broke: bool) -> void:
+	if f.shed_left < 0:
+		f.shed_left = f.shed_budget()
+	f.shed_damage += amount
+	var n := 0
+	while f.shed_left > 0 and (f.shed_damage >= Chores.SHED_EVERY or broke):
+		f.shed_damage = maxf(0.0, f.shed_damage - Chores.SHED_EVERY)
+		f.shed_left -= 1
+		n += 1
+	var toward := Iso.to_floor(by.position - f.position).normalized() if by else Vector2.from_angle(randf() * TAU)
+	if toward.length() < 0.5:
+		toward = Vector2.from_angle(randf() * TAU)
+	for k in n:
+		var kind: String = "pillow" if f.is_soft() else Chores.CLUTTER_KINDS.pick_random()
+		var dist := f.reach() + randf_range(0.6, 1.2) * TILE
+		var at := f.position + Iso.to_screen(toward.rotated(randf_range(-0.7, 0.7)) * dist)
+		_spawn_debris(kind, level.clip(f.position, level.clamp_to_floor(at)))
+
+
 ## Plaster dust from every heavy hit (at most one pile a second per panel),
-## and a hole with a feed line when it breaks.
+## and a hole with a feed line when it breaks. A hole shakes the pictures off
+## the panels either side too.
 func _wall_damaged(panel: WallPanel, broke: bool, by: Player) -> void:
 	var side := Iso.to_screen(Vector2(1, 1) * 9.0)  # the dust lands on the visible side
 	var now := _now()
@@ -1145,6 +1765,9 @@ func _wall_damaged(panel: WallPanel, broke: bool, by: Player) -> void:
 		log_event("breach %s by %d" % [panel.name, by.pid if by else 0])
 		if by:
 			breaches[by.team] += 1
+		for other in level.wall_panels:
+			if Iso.fdist(other.position, panel.position) <= TILE * 1.5:
+				_drop_pictures(other, Vector2(1, 1))
 	elif now - float(_plaster_t.get(panel.index, -10.0)) >= 1.0:
 		_plaster_t[panel.index] = now
 		_spawn_debris("plaster", panel.position + side)
@@ -1162,11 +1785,16 @@ func _nearest_wall(at: Vector2, radius: float) -> WallPanel:
 
 
 @rpc("authority", "call_local", "reliable")
-func _cl_furniture_state(idx: int, hp_frac: float, wrecked: bool, progress: float, helpers: int) -> void:
+func _cl_furniture_state(idx: int, hp_frac: float, wrecked: bool, progress: float, helpers: int, step: int) -> void:
 	var f := level.furniture[idx]
 	var was_wrecked := f.wrecked
-	f.apply_state(hp_frac, wrecked, progress, helpers)
-	if wrecked != was_wrecked:
+	var was_chore := f.current_chore()
+	f.apply_state(hp_frac, wrecked, progress, helpers, step)
+	if phase == Phase.CLEANUP:
+		# A step of its repair done: the sound of that chore, or good as new.
+		var done := f.current_chore() == Chores.Chore.NONE
+		Audio.play_at("rebuilt" if done else Chores.SOUND.get(was_chore, "tidy"), level.entities, f.position)
+	elif wrecked != was_wrecked:
 		Audio.play_at("crash" if wrecked else "rebuilt", level.entities, f.position)
 	elif not wrecked and hp_frac < 1.0:
 		Audio.play_at("crack", level.entities, f.position, -3.0)
@@ -1178,37 +1806,10 @@ func _cl_furniture_state(idx: int, hp_frac: float, wrecked: bool, progress: floa
 
 
 @rpc("authority", "call_local", "unreliable_ordered")
-func _cl_furniture_progress(idx: int, progress: float, helpers: int) -> void:
+func _cl_furniture_progress(idx: int, progress: float, helpers: int, owner_on: bool) -> void:
 	var f := level.furniture[idx]
-	if f.wrecked:
-		f.apply_state(0.0, true, progress, helpers)
-
-
-func _tick_rebuild(f: Furniture, delta: float, send: bool) -> void:
-	var lift := 0
-	var power := 0.0
-	var fixers: Array[Player] = []
-	for p: Player in players.values():
-		if p.interacting and Iso.fdist(p.position, f.position) <= FIX_RADIUS + f.reach():
-			lift += _lift(p)
-			power += _tidy_power(p)
-			fixers.append(p)
-	if lift >= f.required_lift():
-		f.rebuild = minf(1.0, f.rebuild + delta * power / f.rebuild_time())
-	f.helpers = lift
-	# A mended wall only turns solid again once nobody is standing in the gap.
-	if f.rebuild >= 1.0 and f is WallPanel and _body_in(f):
-		if send:
-			_cl_furniture_progress.rpc(f.index, f.rebuild, lift)
-		return
-	if f.rebuild >= 1.0:
-		for p in fixers:
-			stats[p.pid]["fixes"] += 2
-		_cl_furniture_state.rpc(f.index, 1.0, false, 0.0, 0)
-		var who := fixers[0].display_name if not fixers.is_empty() else "Someone"
-		_cl_event.rpc("%s rebuilt the %s!" % [who, _furniture_name(f)], Color("8ff0a4"))
-	elif send:
-		_cl_furniture_progress.rpc(f.index, f.rebuild, lift)
+	f.owner_working = owner_on
+	f.apply_state(f.hp / f.max_hp if f.max_hp > 0.0 else 1.0, f.wrecked, progress, helpers, f.step)
 
 
 ## Is anyone standing where this wall panel would be?
@@ -1258,7 +1859,7 @@ func _srv_decal(pos: Vector2, decal: String) -> void:
 		return
 	# One mark per spot; repeated blasts in the same place don't stack up.
 	for d: Debris in debris.values():
-		if d.kind == decal and Iso.fdist(d.position, pos) < 14.0:
+		if d.kind == decal and Iso.fdist(d.position, pos) < 20.0:
 			return
 	_spawn_debris(decal, pos)
 
@@ -1266,12 +1867,50 @@ func _srv_decal(pos: Vector2, decal: String) -> void:
 # ================================================================== debris
 
 func _spawn_debris(kind: String, pos: Vector2) -> void:
+	var spec: Array = Chores.DEBRIS.get(kind, [Chores.Chore.FLOOR, 0.5, 0.4])
+	# A fresh KO pile on top of an old one just makes that one bigger.
+	if kind in ["fur", "bolts"]:
+		var pile := _nearest_debris(pos, Chores.MERGE_RADIUS, kind, -1)
+		if pile and _grow(pile):
+			return
+	# The house can only hold so much: after that, the nearest pile of the same
+	# kind of mess grows instead, so it still counts.
 	if debris.size() >= MAX_DEBRIS:
+		var pile := _nearest_debris(pos, INF, "", spec[0])
+		if pile:
+			_grow(pile)
 		return
 	var id := _next_debris_id
 	_next_debris_id += 1
 	var jitter := Iso.to_screen(Vector2(randf_range(-6, 6), randf_range(-6, 6)))
 	_cl_debris_add.rpc(id, kind, _free_floor_spot(pos + jitter))
+
+
+## The nearest pile of a kind (or of a chore) within `radius`, or null.
+func _nearest_debris(pos: Vector2, radius: float, kind: String, chore: int) -> Debris:
+	var best: Debris = null
+	var best_d := radius
+	for d: Debris in debris.values():
+		if (kind != "" and d.kind != kind) or (chore >= 0 and d.chore != chore):
+			continue
+		var dist := Iso.fdist(d.position, pos)
+		if dist < best_d:
+			best = d
+			best_d = dist
+	return best
+
+
+func _grow(pile: Debris) -> bool:
+	if pile.growth >= Chores.MAX_GROWTH - 0.001:
+		return false
+	_cl_debris_grow.rpc(pile.debris_id)
+	return true
+
+
+## A scuff mark where someone crashed (one per spot).
+func _scuff(pos: Vector2) -> void:
+	if _nearest_debris(pos, 14.0, "scuff", -1) == null:
+		_spawn_debris("scuff", pos)
 
 
 ## Nudges a point off any furniture (flyers get KO'd above armchairs).
@@ -1287,9 +1926,11 @@ func _free_floor_spot(pos: Vector2) -> Vector2:
 	for step in 12:
 		query.position = level.to_global(p)
 		if space.intersect_point(query, 1).is_empty():
-			return p
+			break
 		p += toward_center * 4.0
-	return p
+	# Somewhere everyone can reach (not tucked against the outside wall).
+	var reach := level.walkable(p)
+	return reach if reach.distance_to(p) > 2.0 and level.wall_between(pos, reach).is_empty() else p
 
 
 @rpc("authority", "call_local", "reliable")
@@ -1301,49 +1942,55 @@ func _cl_debris_add(id: int, kind: String, pos: Vector2) -> void:
 
 
 @rpc("authority", "call_local", "reliable")
-func _cl_debris_remove(id: int) -> void:
+func _cl_debris_grow(id: int) -> void:
 	if debris.has(id):
-		Audio.play_at("scrub", level.entities, debris[id].position, -2.0)
-		debris[id].queue_free()
-		debris.erase(id)
+		debris[id].grow()
+
+
+@rpc("authority", "call_local", "reliable")
+func _cl_debris_remove(id: int, how: int) -> void:
+	if not debris.has(id):
+		return
+	var d: Debris = debris[id]
+	debris.erase(id)
+	match how:
+		How.VACUUM:
+			Audio.play_at("c_vacuum", level.entities, d.position, -4.0)
+			d.vanish(d.position + Vector2(0, -4))
+		How.SWAT:
+			# Batted under the nearest couch (or bed, or table).
+			Audio.play_at("c_swat", level.entities, d.position)
+			d.vanish(_hiding_place(d.position))
+		How.THUMP:
+			d.vanish(d.position, true)
+		How.OWNER:
+			Audio.play_at(Chores.SOUND.get(d.chore, "scrub"), level.entities, d.position, -2.0)
+			d.vanish(d.position)
+		_:
+			Audio.play_at("c_help", level.entities, d.position, -4.0)
+			Fx.text(level.entities, d.position + Vector2(0, -8), "+help", Color("d8d8d8"))
+			d.vanish(d.position)
+
+
+## Where Willow bats things: under the nearest standing soft furniture or table.
+func _hiding_place(from: Vector2) -> Vector2:
+	var best := from + Iso.to_screen(Vector2(20, 0))
+	var best_d := 140.0
+	for f in level.furniture:
+		if f.wrecked or f is WallPanel or not (f.is_soft() or f.style == Furniture.Style.TABLE):
+			continue
+		var dist := Iso.fdist(f.position, from)
+		if dist < best_d and level.wall_between(from, f.position).is_empty():
+			best = f.position
+			best_d = dist
+	return best
 
 
 @rpc("authority", "call_local", "unreliable_ordered")
-func _cl_debris_progress(id: int, progress: float) -> void:
+func _cl_debris_progress(id: int, progress: float, owner_on: bool) -> void:
 	if debris.has(id):
+		debris[id].owner_working = owner_on
 		debris[id].set_progress(progress)
-
-
-func _tick_debris(delta: float) -> void:
-	# Progress bars update ten times a second (not every frame for every pile).
-	_debris_sync_t += delta
-	var send := _debris_sync_t >= 0.1
-	if send:
-		_debris_sync_t = 0.0
-	for id: int in debris.keys():
-		var d: Debris = debris[id]
-		var power := 0.0
-		var cleaner: Player = null
-		for p: Player in players.values():
-			if p.is_ko:
-				continue
-			var dist := Iso.fdist(p.position, d.position)
-			if phase == Phase.CLEANUP and p.data.get("vacuum", false) and dist <= 10.0 and d.kind in ["fur", "bolts", "litter"]:
-				power = 100.0  # Zoomba just hoovers it up.
-				cleaner = p
-				break
-			if phase == Phase.CLEANUP and p.interacting and dist <= DEBRIS_RADIUS:
-				power += _tidy_power(p)
-				cleaner = p
-		if power <= 0.0:
-			continue
-		d.progress += delta * power / d.clean_time
-		if d.progress >= 1.0:
-			if phase == Phase.CLEANUP and cleaner:
-				stats[cleaner.pid]["fixes"] += 1
-			_cl_debris_remove.rpc(id)
-		elif send:
-			_cl_debris_progress.rpc(id, d.progress)
 
 
 # =================================================================== misc

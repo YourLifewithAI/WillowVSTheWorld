@@ -59,6 +59,11 @@ for MAP in $MAPS; do
   if grep -q "] ko " "$LOG"; then pass "$MAP had KOs"; else fail "$MAP had no KOs"; fi
   if grep -q "] knocked " "$LOG"; then pass "$MAP made a mess"; else fail "$MAP: nothing got knocked over"; fi
   if grep -q "score team=" "$LOG"; then pass "$MAP: bots found their way to a base"; else fail "$MAP: nobody scored (bots stuck?)"; fi
+  if grep -qE "chore [A-Z]+: [0-9]+ jobs, weight" "$LOG" && grep -qE "chore [A-Z]+: done [0-9]+ \(owner" "$LOG"; then
+    pass "$MAP: cleanup logged every chore ($(grep -cE 'chore [A-Z]+: done' "$LOG") chores worked on)"
+  else
+    fail "$MAP: no per-chore cleanup log"
+  fi
   for cue in "parents_leave" "whistle" "car_horn" "music war" "music cleanup"; do
     grep -q "\[audio\] $cue\$" "$LOG" || MISSED_CUE="$cue"
   done
@@ -85,6 +90,15 @@ echo "== Walls: what breaks them, what they stop, and the bots' routes"
 no_script_errors "$OUT/walls.log" "walls"
 grep -E "^  (PASS|FAIL)  walls:" "$OUT/walls.log"
 if grep -q "FAIL  walls:" "$OUT/walls.log" || ! grep -q "^\[walls\] [0-9]* passed, 0 failed" "$OUT/walls.log"; then
+  FAILED=1
+fi
+
+echo "== Cleanup by specialty: who owns what, work rates, repair steps, each character's own way of cleaning"
+"$GODOT" --headless --fixed-fps 60 --path "$GAME" res://tests/chores_test.tscn -- --war=300 \
+  > "$OUT/chores.log" 2>&1
+no_script_errors "$OUT/chores.log" "chores"
+grep -E "^  (PASS|FAIL)  chores:" "$OUT/chores.log"
+if grep -q "FAIL  chores:" "$OUT/chores.log" || ! grep -q "^\[chores\] [0-9]* passed, 0 failed" "$OUT/chores.log"; then
   FAILED=1
 fi
 

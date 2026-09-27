@@ -141,6 +141,8 @@ func _hit_wall(arena: Match, panel: WallPanel) -> void:
 	else:
 		Fx.puff(arena.level.entities, position + Vector2(0, -z), Color(1, 1, 1, 0.7))
 		Audio.play_at("tink", arena.level.entities, position, -4.0)
+		if authoritative:
+			arena.report_furniture_hit(panel, 0.0, shooter, ability)  # it still knocks the pictures off
 	queue_free()
 
 

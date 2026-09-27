@@ -27,8 +27,9 @@ place too hard and *everyone* is grounded.
    special, dash, interact) and every character reads at a glance.
 3. **Rivals, then roommates.** The same players who just fought have to cooperate.
    Every lamp you knock over in phase 1 is a lamp *someone* has to fix in phase 2.
-4. **Every character is a personality.** Cats are fast and chaotic and bad at chores.
-   The helper bot was literally built for tidying. Abilities follow from who they are.
+4. **Every character is a personality.** Cats are fast and chaotic; the helper bot
+   was literally built for tidying. Abilities follow from who they are, and so do
+   chores: everyone cleans up one kind of mess their own way.
 
 ## Match flow
 
@@ -37,7 +38,7 @@ place too hard and *everyone* is grounded.
 | Countdown | 3 s | "The parents just left..." Everyone at their base. |
 | **War** | 3:00, or first to **5** captures | Capture the remote. KOs, explosions, wrecked furniture. |
 | Whistle | 3 s | "CAR IN THE DRIVEWAY!" Everyone freezes; KO'd players wake up. |
-| **Cleanup** | 0:45 | Both teams rebuild, fix, sweep and return the remote. |
+| **Cleanup** | 0:45-1:03 (per home) | Everyone to their job: each character cleans up one kind of mess. |
 | Results | until the host continues | The parents' verdict, the TV, the awards. |
 
 All of these are `@export` knobs on `Match` (`game/scenes/match/match.gd`).
@@ -175,28 +176,70 @@ laundry) can be knocked over:
 | A character sent tumbling into it | knocked | knocked |
 | A character dashing into it | knocked | no |
 | **Cats just walking into it** (Willow, Biscuit) | knocked | no |
-| Every KO | +1 fur tuft or pile of bolts | |
-| Every explosion | +1 scorch mark (or egg splat) | |
-| Every Litter Bomb | +3 piles of cat litter | |
+| Every KO | +1 fur tuft or pile of bolts (a second KO on the same spot makes the pile bigger) | |
+| Every explosion | +1 scorch mark (or egg splat), one per spot | |
+| Every Litter Bomb | +2 piles of cat litter | |
+| A character knocked flying into furniture or a wall | +1 scuff mark | |
+| Every 25 damage to furniture | +1 book, toy, sock or magazine (pillows off soft furniture), up to 1-3 per piece; a wreck sheds the rest, plus crumbs | |
+| A hard hit (>= 200 force) | flings a light thing 2-4 tiles away | |
+| Plants, trash cans, milk, pie, shelves, baskets | spill dirt, rubbish, puddles, books or toys | |
+| Any hit on an inside wall, even a weak one | knocks its picture down | |
+
+Things that live up high (pictures on the inside walls, milk and pie on counters
+and tables, books on desks) fall when they're hit.
 
 ## Phase 2: Cover it up
 
 When the war ends, everyone is friends. No attacking. The goal is to get the
-**House tidiness** meter as high as possible before the timer runs out.
+house as tidy as possible before the parents walk in. At the whistle, a bubble
+over each character says their job ("HIDE IT!", "FETCH!"...).
 
-| Task | How | Weight |
-|---|---|---|
-| **Rebuild wrecked furniture** | Two helpers hold *interact* at the rubble (Unit-7 or The Claw can do it alone) | 2 + its size |
-| Stand something back up | Hold *interact* next to it (3 s, faster with helpers) | 1 |
-| Heavy things (marked **x2**) | Two helpers at once, or Unit-7 / The Claw alone | 3 |
-| Sweep fur and bolts | Hold *interact* next to it (0.8 s). Zoomba just drives over it | 0.5 |
-| Scrub scorch marks and egg, sweep litter | Hold *interact* next to it (0.9-1.2 s) | 0.5 |
-| Return the remote | Carry it back onto the middle rug | 1 |
+**Everyone cleans up differently.** Every bit of mess belongs to one chore, and
+every chore to one character, who does it properly. Anyone else can help, at a
+fifth of the speed. So after a big war the house only gets spotless if everyone
+plays to their strengths (numbers in `game/scripts/core/chores.gd`).
 
-**Tidiness** = how much of the mess at the start of cleanup you undid.
-The robots are the rebuild specialists: Unit-7 tidies at 2x and counts as two
-helpers, The Claw counts as two, Zoomba vacuums, and everyone near Bass works 30%
-faster. The cats (0.6-0.75x) mostly get in the way.
+| Chore | Owner | Mess | How the owner does it |
+|---|---|---|---|
+| **VACUUM!** | Zoomba | fur, bolts, litter, plaster dust, crumbs, dirt, rubbish | drives over it |
+| **HIDE IT!** | Willow | books, toys, socks, magazines | runs over them and bats them under the couch |
+| **THUMP!** | Bass | scorch marks, egg, scuffs, spills | holds *interact*: a thump every 0.7 s cleans every stain nearby, through walls |
+| **FETCH!** | Pepper | knocked-over lamps, vases, plants, guitars... | runs into them: they pop back up, or strays go home in his mouth |
+| **KNEAD!** | Biscuit | pillows, saggy couches and armchairs, the stuffing of wrecked ones | holds *interact* |
+| **FIX IT!** | Unit-7 | cracked and wrecked hard furniture, taping a mended wall | holds *interact* |
+| **LIFT!** | The Claw | heavy things (bookshelves, baskets), standing every wreck back up, a new wall panel | holds *interact* |
+| **UP HIGH!** | Kiwi | pictures, things that live on counters and desks, painting a mended wall | holds *interact* |
+| Remote | anyone | the TV remote | carry it back onto its rug |
+
+- **Helpers** (anyone who doesn't own the chore) hold *interact* at a job and work
+  at 0.2x. Heavy and high jobs need **two helpers at once** while their owner is
+  around (two dots under the job's badge).
+- **Nobody owns it?** If that character isn't playing, or its player has done no
+  cleaning at all for 8 s, its jobs become everyone's (a grey hand on the badge):
+  anyone works them at 0.5x, alone. They turn back the moment the owner gets going.
+- **Two of the same character?** The second takes the biggest chore nobody plays.
+- **Repairs come in steps, each someone's job:** a wreck is stood back up by the
+  Claw, then fixed by Unit-7 (or kneaded by Biscuit, if it's soft). A hole in a
+  wall needs the Claw (a new panel), then Unit-7 (tape), then Kiwi (paint).
+- Bass's **Cleaning Playlist** makes everyone nearby work 20% faster.
+
+**Reading it from the sofa.** Every job carries a badge with its owner's face. The
+ring is your colour if it's yours, and it bobs. Floor mess that's yours gets a
+pulsing ring in your colour. An arrow on your character's ring points at your
+nearest job; when your list is done you get a tick and an "ALL DONE! HELP!", and
+the arrow points at a job anyone can do. The panel in the top-left corner shows how
+tidy the house is against the parents' marks (60% and 90%) and every chore's face
+with how many jobs are left; the biggest one pulses.
+
+**Tidiness** = how much of the mess at the start of cleanup you undid, by weight.
+The weights are set so that after a big war each chore is roughly an equal share
+of the house.
+
+**Calibration (bots only, full 3-minute wars, 8 players):** every character
+playing its role ends at 92-100%; one bot ignoring its role 78-94%; nobody
+playing to their strengths 43-52% (grounded on every map). People will be slower
+than bots, so the cleanup times (per home, in `game/scripts/core/maps.gd`) need
+tuning against real playtests.
 
 ### The parents' verdict
 
@@ -210,7 +253,9 @@ This is the core tension: winning the war by trashing the house can still lose t
 game. A tie in captures means the TV stays on the weather channel.
 
 End-of-match awards: **Remote runner** (most captures), **Most bonks** (most KOs),
-**Tidiest** (most things fixed).
+**Tidiest** (most mess cleared). The results also say what each person on the
+screen got done in their own job ("Willow hid 14 things under the couch") and
+which rooms are still a mess.
 
 ## The roster
 
@@ -232,9 +277,9 @@ clear strength and one clear weakness. Numbers live in `game/scripts/core/roster
 | | Role | HP | Weapon | Special | Strength | Weakness |
 |---|---|---|---|---|---|---|
 | **Zoomba**, robot vacuum | Ambusher | 90 | **Dust Cannon**: close-range shotgun | **Turbo Suck**: pulls enemies *and a loose remote* in | **Low Profile**: hides under furniture; ambushes do double damage | **Flips Over**: a big hit leaves it upside down and helpless |
-| **Unit-7**, helper bot | Engineer | 140 | **Toaster Cannon**: lobbed flaming toast | **Rocket Fist**: long-range punch | **X-Ray Vision** (long-range reveal) and **Handy** (2x rebuild speed, fixes big things alone) | **Clunky**: slow, stiff short dash |
-| **The Claw**, ceiling gantry | Wrecker | 75 | **Wrecking Ball**: huge swing, flattens furniture | **Claw Drop**: telegraphed slam, long stun | **Ceiling Rider + Strong**: glides over furniture, lifts heavy things alone | **Long Reboot**: +3 s before respawning |
-| **Bass**, smart speaker | Support | 100 | **Subwoofer Cannon**: bass waves that pass through enemies *and* furniture | **Hype Track**: heals and speeds up nearby allies | **Cleaning Playlist**: allies nearby tidy 30% faster | **No Legs**: hops, so its dash is tiny |
+| **Unit-7**, helper bot | Engineer | 140 | **Toaster Cannon**: lobbed flaming toast | **Rocket Fist**: long-range punch | **X-Ray Vision**: long-range reveal for the whole team | **Clunky**: slow, stiff short dash |
+| **The Claw**, ceiling gantry | Wrecker | 75 | **Wrecking Ball**: huge swing, flattens furniture | **Claw Drop**: telegraphed slam, long stun | **Ceiling Rider**: glides over furniture | **Long Reboot**: +3 s before respawning |
+| **Bass**, smart speaker | Support | 100 | **Subwoofer Cannon**: bass waves that pass through enemies *and* furniture | **Hype Track**: heals and speeds up nearby allies | **Cleaning Playlist**: everyone nearby cleans up 20% faster | **No Legs**: hops, so its dash is tiny |
 
 Each character's **gag** is listed in *Gags* above.
 
@@ -250,9 +295,9 @@ the runs are, where the chokepoints are, how much stuff there is to break.
 
 | Home | Size | Best for | What makes it different |
 |---|---|---|---|
-| **The Family Home** (default) | 18x18, four rooms | 4-8 | Dining room, kitchen, den and living room in a ring (mirror-symmetric). The pets' base is in the kitchen, the robots' in the den, each behind a door with a second way out through the dining room. The remote sits in the living room, the front-most room, so no wall hides the fight. War 3:00, cleanup 1:05. |
-| **Suburban House** | 22x14, five rooms | 6-8 | A long ranch house: kitchen, dining room and mudroom (pets), living room, garage workshop (robots) and den. Four doors into the living room, so eight players never jam one choke. Long runs; passing matters. War 3:30, cleanup 1:10. |
-| **The Farmhouse** | 17x17, four rooms and a porch | 4-6 | Pantry, mudroom (pets), workshop (robots) and a farm kitchen around an old stone chimney that never breaks. A porch runs round the outside, so every base has three ways out. Cleanup 1:00. |
+| **The Family Home** (default) | 18x18, four rooms | 4-8 | Dining room, kitchen, den and living room in a ring (mirror-symmetric). The pets' base is in the kitchen, the robots' in the den, each behind a door with a second way out through the dining room. The remote sits in the living room, the front-most room, so no wall hides the fight. War 3:00, cleanup 0:58. |
+| **Suburban House** | 22x14, five rooms | 6-8 | A long ranch house: kitchen, dining room and mudroom (pets), living room, garage workshop (robots) and den. Four doors into the living room, so eight players never jam one choke. Long runs; passing matters. War 3:30, cleanup 1:03. |
+| **The Farmhouse** | 17x17, four rooms and a porch | 4-6 | Pantry, mudroom (pets), workshop (robots) and a farm kitchen around an old stone chimney that never breaks. A porch runs round the outside, so every base has three ways out. Cleanup 0:54. |
 | **Studio Apartment** | 12x12, one room | 2-4 | Bed, desk and kitchenette crammed together. Short runs, constant brawling, a milk jug that has escaped the fridge. War 2:30, cleanup 0:45. |
 | **The Living Room (classic)** | 16x16, one room | 4-6 | The original: open, symmetric, easy to read. No walls, so it's the place to learn. Cleanup 0:50. |
 
@@ -513,12 +558,12 @@ tools/smoke_test.sh             headless end-to-end tests
 | Channel time to score | `Match.CHANNEL_TIME` | 2 s |
 | Verdict thresholds | `Match.TIDY_PASS`, `TIDY_SPOTLESS` | 60% / 90% |
 | Character stats and moves | `Roster.CHARACTERS` | see tables above |
-| Fix times, heavy threshold | `MessItem` | 3 s / 5 s, 200 force |
+| Chores: owners, rates, job times and weights | `Chores` (`game/scripts/core/chores.gd`) | see *Phase 2* |
+| Heavy threshold | `MessItem` | 200 force |
 
 **Playtest notes so far (bots only):** a 3v3 bot war reaches 5 captures in
-~60-100 s with 15-40 KOs and 8-9 knocked items. Six bots clean that up in about
-10-15 s, so bots are far better at chores than people will be. The 45 s cleanup
-needs tuning against **human** playtests.
+~60-100 s with 15-40 KOs. For cleanup calibration see *Phase 2*; the numbers
+need tuning against **human** playtests.
 
 ## Roadmap
 

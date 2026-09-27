@@ -253,14 +253,18 @@ sprite_name = "trash_can"
 spill_sprite = "garbage"
 
 [node name="Milk" type="Node2D" parent="Entities"]
-position = Vector2(-118.4, 91.2)
+position = Vector2(-130.4, 75)
 script = ExtResource("5_mess")
 sprite_name = "milk"
+high = true
+hang = 14
 
 [node name="Pie" type="Node2D" parent="Entities"]
-position = Vector2(-105.6, 132.8)
+position = Vector2(-99.2, 114.6)
 script = ExtResource("5_mess")
 sprite_name = "pie"
+high = true
+hang = 14
 
 [node name="Boots" type="Node2D" parent="Entities"]
 position = Vector2(-195.2, 116.8)
@@ -315,9 +319,11 @@ heavy = true
 spill_sprite = "books"
 
 [node name="DenBooks" type="Node2D" parent="Entities"]
-position = Vector2(105.6, 132.8)
+position = Vector2(99.2, 114.6)
 script = ExtResource("5_mess")
 sprite_name = "books"
+high = true
+hang = 12
 
 [node name="Recycling" type="Node2D" parent="Entities"]
 position = Vector2(97.6, 77.6)
@@ -444,3 +450,45 @@ spill_sprite = "dirt"
 position = Vector2(-25.6, 240)
 script = ExtResource("5_mess")
 sprite_name = "books"
+
+[node name="PicDen" type="Node2D" parent="Entities"]
+position = Vector2(91.2, 69.6)
+script = ExtResource("5_mess")
+sprite_name = "picture"
+high = true
+hang = 10
+
+[node name="PicKitchen" type="Node2D" parent="Entities"]
+position = Vector2(-11.2, 109.6)
+script = ExtResource("5_mess")
+sprite_name = "picture"
+high = true
+hang = 10
+
+[node name="PicLivingW1" type="Node2D" parent="Entities"]
+position = Vector2(-100.8, 165.6)
+script = ExtResource("5_mess")
+sprite_name = "picture"
+high = true
+hang = 10
+
+[node name="PicLivingW2" type="Node2D" parent="Entities"]
+position = Vector2(-148.8, 189.6)
+script = ExtResource("5_mess")
+sprite_name = "picture"
+high = true
+hang = 10
+
+[node name="PicLivingN1" type="Node2D" parent="Entities"]
+position = Vector2(100.8, 165.6)
+script = ExtResource("5_mess")
+sprite_name = "picture"
+high = true
+hang = 10
+
+[node name="PicLivingN2" type="Node2D" parent="Entities"]
+position = Vector2(148.8, 189.6)
+script = ExtResource("5_mess")
+sprite_name = "picture"
+high = true
+hang = 10

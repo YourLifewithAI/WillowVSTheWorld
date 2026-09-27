@@ -165,14 +165,14 @@ func _run() -> void:
 	_place(bass, WALL_I, hole.rect.get_center().y, Vector2(1, 0))
 	await frames(3)
 	hole.rebuild = 1.0
-	arena._tick_rebuild(hole, 0.1, true)
+	arena._finish_job(hole, true, 0, true)  # the Claw has lowered a new panel in
 	await frames(2)
 	check(hole.wrecked, "a mended wall waits while someone stands in the gap")
 	_park(bass)
 	await frames(3)
-	arena._tick_rebuild(hole, 0.1, true)
+	arena._finish_job(hole, true, 0, true)
 	await frames(2)
-	check(not hole.wrecked, "...and goes solid once they've moved")
+	check(not hole.wrecked and hole.step == 1, "...and goes solid once they've moved (then it needs taping)")
 	_mend_all()
 
 	# The remote: thrown at a wall it drops on this side; nobody picks it up through one.
@@ -281,20 +281,20 @@ func _panel(j: float) -> WallPanel:
 
 
 func _mend(p: WallPanel) -> void:
-	arena._cl_furniture_state(p.index, 1.0, false, 0.0, 0)
+	arena._cl_furniture_state(p.index, 1.0, false, 0.0, 0, 0)
 	p.hp = p.max_hp
 
 
 func _mend_all() -> void:
 	for p in arena.level.wall_panels:
-		if p.max_hp > 0.0 and (p.wrecked or p.hp < p.max_hp):
+		if p.max_hp > 0.0 and (p.wrecked or p.hp < p.max_hp or p.step > 0):
 			_mend(p)
 
 
 func _damaged() -> Array[WallPanel]:
 	var out: Array[WallPanel] = []
 	for p in arena.level.wall_panels:
-		if p.max_hp > 0.0 and (p.wrecked or p.hp < p.max_hp):
+		if p.max_hp > 0.0 and (p.wrecked or p.hp < p.max_hp or p.step > 0):
 			out.append(p)
 	return out
 

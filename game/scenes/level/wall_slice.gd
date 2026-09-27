@@ -103,6 +103,12 @@ func _draw() -> void:
 	if panel.wrecked:
 		_draw_hole(i0, j0, i1, j1, face)
 		return
+	# Being mended: a new grey board, then taped, then primed white, then painted.
+	var mending := panel.step
+	if mending == 1:
+		face = Color("c3c2bb").darkened(0.08 if plane_i else 0.0)
+	elif mending == 2:
+		face = Color("f4f2ec").darkened(0.08 if plane_i else 0.0)
 	var fa := _fade
 	# The long face the camera sees (+i for plane I, +j for plane J), and the end.
 	var long_face: PackedVector2Array
@@ -116,6 +122,11 @@ func _draw() -> void:
 	draw_colored_polygon(end_face, _a(face.darkened(0.25), fa))
 	draw_colored_polygon(long_face, _a(face, fa))
 	_draw_material(long_face, fa)
+	if mending == 1:
+		# Tape seams down the new board.
+		for t in [0.1, 0.9]:
+			var bottom := long_face[0].lerp(long_face[1], t)
+			draw_line(bottom, bottom + Vector2(0, -WallRun.HEIGHT), _a(Color(1, 1, 1, 0.7), fa), 1.0)
 	# Where it meets the floor, and the ends of the run: a crisp outline.
 	draw_line(long_face[0], long_face[1], OUTLINE, 1.0)
 	if _run_end(true):

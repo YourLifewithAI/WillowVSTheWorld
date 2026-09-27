@@ -1,8 +1,8 @@
 class_name Hud
 extends CanvasLayer
 ## Scoreboard, clock, a card per person on this screen (health, cooldowns,
-## gag meter), the event feed, banners, the cleanup meter, the menu and the
-## results card. Built in code; it sits on top of the pixel-art world at full
+## gag meter; their chore in cleanup), the event feed, banners, the cleanup
+## panel (see ChorePanel), the menu and the results card. Built in code; it sits on top of the pixel-art world at full
 ## resolution so text stays crisp.
 ##
 ## Controllers never move the menus' focus (several people share one screen,
@@ -21,9 +21,7 @@ var _score_l: Label
 var _score_r: Label
 var _clock: Label
 var _phase: Label
-var _tidy_box: Control
-var _tidy_bar: ProgressBar
-var _tidy_label: Label
+var _chore_panel: ChorePanel
 ## One per person on this screen: {player, hp, special_bar, dash_bar, gag_bar, gag_label, special_label}.
 var _cards: Array[Dictionary] = []
 var _feed: VBoxContainer
@@ -150,16 +148,9 @@ func _build_scoreboard() -> void:
 	row.add_child(_score_r)
 	row.add_child(UiTheme.sprite_icon("butler", 18))
 
-	_tidy_box = VBoxContainer.new()
-	_tidy_box.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
-	_tidy_box.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	_tidy_box.position.y = 44
-	_root.add_child(_tidy_box)
-	_tidy_label = UiTheme.label("House tidiness", 8, Color.WHITE, true)
-	_tidy_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_tidy_box.add_child(_tidy_label)
-	_tidy_bar = UiTheme.bar(Color("8ff0a4"), 140, 6)
-	_tidy_box.add_child(_tidy_bar)
+	_chore_panel = ChorePanel.new(arena)
+	_chore_panel.position = Vector2(6, 6)
+	_root.add_child(_chore_panel)
 
 
 ## A card per person on this screen: along the bottom when several share it,
@@ -293,7 +284,7 @@ func feed(text: String, color: Color) -> void:
 
 func on_phase_changed() -> void:
 	var phase := arena.phase
-	_tidy_box.visible = phase == Match.Phase.CLEANUP
+	_chore_panel.visible = phase == Match.Phase.CLEANUP
 	match phase:
 		Match.Phase.LOADING:
 			_phase.text = "waiting for everyone..."
@@ -309,8 +300,14 @@ func on_phase_changed() -> void:
 			_hint.text = ""
 		Match.Phase.CLEANUP:
 			_phase.text = "CLEAN UP BEFORE THEY'RE IN"
-			_hint.text = "Hold %s by anything broken or knocked over   ·   \"x2\" needs two helpers (or Unit-7 / The Claw)   ·   Return the remote" % (
-				"the right button" if _pads_on_screen() else "E")
+			_hint.text = "Your face = your job   ·   Grey hand = anyone's   ·   Two dots = two helpers   ·   Hold %s to help" % (
+				"right" if _pads_on_screen() else "E")
+
+
+## Who owns which chore changed (the whistle, or someone wandered off).
+func on_chores_changed() -> void:
+	if _chore_panel:
+		_chore_panel.queue_redraw()
 
 
 ## Is anyone on this screen playing on a controller? (Then hints name buttons, not keys.)
@@ -332,10 +329,6 @@ func _process(_delta: float) -> void:
 		_clock.text = str(maxi(1, t))
 	elif arena.phase == Match.Phase.RESULTS:
 		_clock.text = "Home!"
-	if arena.phase == Match.Phase.CLEANUP:
-		var tidy := arena.tidiness()
-		_tidy_bar.value = tidy
-		_tidy_label.text = "House tidiness  %d%%   (parents need %d%%)" % [roundi(tidy * 100.0), roundi(Match.TIDY_PASS * 100.0)]
 	for c in _cards:
 		_update_card(c)
 	_poll_menus()
@@ -353,7 +346,11 @@ func _update_card(c: Dictionary) -> void:
 	c["gag_bar"].value = me.gag_charge
 	var gag_label: Label = c["gag_label"]
 	var gag_name: String = me.data["gag"]["name"]
-	if me.gag_t > 0.0:
+	if arena.phase == Match.Phase.CLEANUP or arena.phase == Match.Phase.WHISTLE:
+		# How this character cleans.
+		gag_label.text = String(me.data["tidy_note"]).replace("{interact}", keys["interact"])
+		gag_label.modulate.a = 1.0
+	elif me.gag_t > 0.0:
 		gag_label.text = "%s!" % gag_name.to_upper()
 	elif me.gag_charge >= 1.0:
 		gag_label.text = "%s: %s READY!" % [keys["gag"], gag_name.to_upper()]
@@ -370,7 +367,14 @@ func _update_card(c: Dictionary) -> void:
 	elif me.dance_t > 0.0:
 		label.text = "Can't stop dancing!"
 	elif arena.phase == Match.Phase.CLEANUP:
-		label.text = "Hold %s to fix things (%s)" % [keys["interact"], me.data["tidy_note"].trim_suffix(".").to_lower()]
+		var mine := arena.my_chore(me)
+		var left: int = arena.chore_totals().get(mine, [0, 0.0])[0]
+		if mine == Chores.Chore.NONE:
+			label.text = "Help out! Hold %s by anything" % keys["interact"]
+		elif left > 0:
+			label.text = "%s  %d left" % [Chores.VERB.get(mine, ""), left]
+		else:
+			label.text = "All done! Now help the others"
 	elif me.is_ko:
 		label.text = "KO'd! Back in a moment..."
 	elif me.carrying:
@@ -522,7 +526,7 @@ func show_results(results: Dictionary) -> void:
 		_lost_panel.queue_free()
 		_lost_panel = null
 	_set_paused("lost", false)
-	_tidy_box.visible = false
+	_chore_panel.visible = false
 	_hint.text = ""
 	_phase.text = "THE PARENTS ARE HOME"
 	_results = _centered_panel()
@@ -563,7 +567,7 @@ func show_results(results: Dictionary) -> void:
 		Roster.TEAM_NAMES[0], arena.scores[0], arena.scores[1], Roster.TEAM_NAMES[1], roundi(tidy * 100.0)], 9)
 	sc.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	col.add_child(sc)
-	for line in _awards():
+	for line in _awards() + _cleanup_lines():
 		var al := UiTheme.label(line, 8, UiTheme.COCOA)
 		al.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		col.add_child(al)
@@ -600,14 +604,47 @@ func show_results(results: Dictionary) -> void:
 
 func _awards() -> Array[String]:
 	var out: Array[String] = []
-	for award in [["caps", "Remote runner"], ["bonks", "Most bonks"], ["fixes", "Tidiest"]]:
+	for award in [["caps", "Remote runner"], ["bonks", "Most bonks"], ["tidied", "Tidiest"]]:
 		var best_pid := 0
-		var best := 0
+		var best := 0.0
 		for pid: int in arena.stats:
-			var v: int = arena.stats[pid][award[0]]
+			var v := float(arena.stats[pid].get(award[0], 0))
 			if v > best:
 				best = v
 				best_pid = pid
-		if best > 0 and arena.players.has(best_pid):
-			out.append("%s: %s (%d)" % [award[1], arena.players[best_pid].display_name, best])
+		if best > 0.0 and arena.players.has(best_pid):
+			out.append("%s: %s (%d)" % [award[1], arena.players[best_pid].display_name, roundi(best)])
+	return out
+
+
+## What everyone on this screen got done in their own job, and which rooms the
+## parents will find a mess in.
+const DONE_LINES := {
+	Chores.Chore.FLOOR: "vacuumed up %d piles", Chores.Chore.CLUTTER: "hid %d things under the couch",
+	Chores.Chore.STAIN: "thumped away %d stains", Chores.Chore.FETCH: "fetched %d things",
+	Chores.Chore.SOFT: "fluffed %d cushions", Chores.Chore.REPAIR: "fixed %d things",
+	Chores.Chore.LIFT: "lifted %d heavy things", Chores.Chore.HIGH: "put %d things back up high",
+}
+
+
+func _cleanup_lines() -> Array[String]:
+	var out: Array[String] = []
+	var parts: Array[String] = []
+	var lumpy := false
+	for p in arena.local_players():
+		var c := arena.my_chore(p)
+		var n := int(arena.stats.get(p.pid, {}).get("own", 0))
+		if DONE_LINES.has(c) and n > 0:
+			parts.append("%s %s" % [p.display_name, DONE_LINES[c] % n])
+			lumpy = lumpy or (c == Chores.Chore.CLUTTER and n >= 10)
+	if not parts.is_empty():
+		out.append(",  ".join(parts) + ".")
+	var rooms := arena.leftovers_by_room()
+	if not rooms.is_empty():
+		var bits: Array[String] = []
+		for r: String in rooms:
+			bits.append("%s: %d left" % [r, rooms[r]])
+		out.append("Still a mess:  " + ",  ".join(bits.slice(0, 4)))
+	if lumpy:
+		out.append("\"Why is the couch so lumpy?\"")
 	return out

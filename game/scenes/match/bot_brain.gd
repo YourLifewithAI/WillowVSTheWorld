@@ -2,7 +2,7 @@ class_name BotBrain
 extends Controls
 ## A simple bot that produces the same input a player would.
 ## During the war it grabs, escorts, or chases the remote. During cleanup it
-## helps fix whatever is closest (and not already being handled).
+## plays its character's role (see _cleanup).
 
 var me: Player
 var arena: Match
@@ -14,7 +14,6 @@ var _last_pos := Vector2.ZERO
 var _hesitate := 0.0
 var _wander := Vector2.ZERO
 var _wander_t := 0.0
-var _nap_t := randf_range(2.0, 5.0)
 var _path := PackedVector2Array()
 var _path_goal := Vector2.INF
 var _path_t := 0.0
@@ -29,6 +28,11 @@ var _breach_cd := randf_range(8.0, 20.0)
 func _init(player: Player, match_node: Match) -> void:
 	me = player
 	arena = match_node
+	if Net.options.has("generic_bots"):
+		var n := String(Net.options["generic_bots"])
+		_generic = n == "true" or (player.pid < 0 and player.pid >= -int(n))
+		if _generic:
+			print("[bot] %s ignores its specialty (testing)" % player.char_id)
 	_last_pos = player.position
 
 
@@ -326,52 +330,63 @@ func _nearest_enemy(from: Vector2) -> Player:
 
 # ================================================================ cleanup
 
+## Cleanup: each bot plays its own role (see Chores). It picks the job worth
+## the most tidiness per second of its time: its own chore counts four times
+## over, a heavy or high job with one helper already waiting is worth joining,
+## and a job another bot is already on is worth less. Zoomba and Willow drive
+## through their piles, Pepper runs into knocked-over things (and carries the
+## strays home), Bass THUMPs where the stains are thickest, and everyone else
+## holds interact at the job.
+const LOOK_AROUND := Vector2(1.2, 2.0)
+const CLAIM_PATIENCE := 3.0
+const BOT_PACE := 0.95
+
+var _job = null  # (untyped: floor mess may be freed under it)
+var _job_progress := -1.0
+var _job_stalled := 0.0
+var _job_closest := INF
+var _replan_t := 0.0
+var _look_t := 0.0
+var _skip: Dictionary = {}  # jobs this bot gave up on -> seconds before it tries again
+## Testing: bots that ignore what they're good at and just tidy whatever's best
+## for anyone (to measure how much playing to your strengths matters).
+var _generic := false
+
+
 func _cleanup(inp: Dictionary, delta: float) -> void:
-	# Cats "supervise": every few seconds they stop helping for a nap.
-	if me.data.get("clumsy", false):
-		_nap_t -= delta
-		if _nap_t < 0.0:
-			if _nap_t < -2.5:
-				_nap_t = randf_range(3.0, 6.0)
-			return
 	var r := arena.remote
 	if me.carrying:
-		inp["move"] = _steer(arena.level.home.position, delta)
+		inp["move"] = _steer(arena.level.home.position, delta) * BOT_PACE
 		return
-	var goal_pos := Vector2.INF
-	var goal_radius := 12.0
+	var held := arena.carried_by(me)
+	if held:
+		inp["move"] = _steer(held.home, delta) * BOT_PACE  # he drops it once he's there
+		return
+	for job in _skip.keys():  # (some may be freed by now)
+		_skip[job] -= delta
+		if _skip[job] <= 0.0:
+			_skip.erase(job)
+	if _look_t > 0.0:
+		_look_t -= delta
+		return
 	if r.is_free() and r.state != TVRemote.State.HOME and _closest_to(r.position):
-		goal_pos = r.position
-		goal_radius = 0.0
-	else:
-		var best_score := INF
-		for f in arena.level.furniture:
-			if not f.wrecked:
-				continue
-			var fd := Iso.fdist(f.position, me.position)
-			var f_busy: bool = f.helpers >= f.required_lift() and fd > Match.FIX_RADIUS + f.reach()
-			var f_score := fd - 60.0 + (120.0 if f_busy else 0.0)
-			if f_score < best_score:
-				best_score = f_score
-				goal_pos = f.position
-				goal_radius = Match.FIX_RADIUS * 0.6 + f.reach()
-		for item in arena.level.mess_items:
-			if not item.knocked:
-				continue
-			var d := Iso.fdist(item.position, me.position)
-			var busy: bool = item.helpers >= item.required_lift() and Iso.fdist(item.position, me.position) > Match.FIX_RADIUS
-			var score := d + (120.0 if busy else 0.0) - (40.0 if item.heavy else 0.0)
-			if score < best_score:
-				best_score = score
-				goal_pos = item.position
-				goal_radius = Match.FIX_RADIUS * 0.6
-		for d: Debris in arena.debris.values():
-			var dd := Iso.fdist(d.position, me.position) + 30.0
-			if dd < best_score:
-				best_score = dd
-				goal_pos = d.position
-				goal_radius = Match.DEBRIS_RADIUS - 3.0
-	if goal_pos == Vector2.INF:
+		_set_job(null)
+		inp["move"] = _steer(r.position, delta) * BOT_PACE
+		return
+	# Done with the last job (or it's done without us)? Look around, then pick another.
+	if typeof(_job) == TYPE_OBJECT and not arena.is_open(_job):
+		_set_job(null)
+		_look_t = randf_range(0.2, 0.4) if arena.has_owner_move(me) else randf_range(LOOK_AROUND.x, LOOK_AROUND.y)
+		if randf() < 0.05:
+			_look_t += 1.0  # a good stretch
+		return
+	_replan_t -= delta
+	if _job == null or _replan_t <= 0.0:
+		_replan_t = 0.5
+		var pick := _pick_job()
+		if pick != _job:
+			_set_job(pick)
+	if _job == null:
 		# Nothing left: mill about the rug looking innocent.
 		_wander_t -= delta
 		if _wander_t <= 0.0:
@@ -379,11 +394,120 @@ func _cleanup(inp: Dictionary, delta: float) -> void:
 			_wander = arena.level.home.position + Iso.to_screen(Vector2.from_angle(randf() * TAU) * randf_range(20, 60))
 		inp["move"] = _steer(_wander, delta) * 0.5
 		return
-	if Iso.fdist(goal_pos, me.position) <= goal_radius:
-		inp["interact"] = true
-		inp["move"] = Vector2.ZERO
+	_work_on(inp, delta)
+
+
+func _set_job(job) -> void:
+	if typeof(_job) == TYPE_OBJECT and arena.claims.get(_job) == me.pid:
+		arena.claims.erase(_job)
+	_job = job
+	_job_progress = -1.0
+	_job_stalled = 0.0
+	_job_closest = INF
+	me.focus_job = job
+	if job:
+		arena.claims[job] = me.pid
+
+
+func _work_on(inp: Dictionary, delta: float) -> void:
+	var c := arena.chore_of(_job)
+	var pos: Vector2 = (_job as Node2D).position
+	var own_move := arena.has_owner_move(me) and c == arena.my_chore(me) and not _generic
+	if own_move:
+		# Not getting any closer (it's somewhere awkward)? Leave it for someone else.
+		var dist := Iso.fdist(pos, me.position)
+		if dist < _job_closest - 1.0:
+			_job_closest = dist
+			_job_stalled = 0.0
+		else:
+			_job_stalled += delta
+			if _job_stalled >= 2.0:
+				_skip[_job] = 6.0
+				_set_job(null)
+				return
+	if own_move and c != Chores.Chore.STAIN:
+		# Zoomba, Willow, Pepper: just run through it.
+		inp["move"] = _steer(pos, delta) * BOT_PACE
+		return
+	if own_move:
+		# Bass: THUMP once there are stains in range.
+		if Iso.fdist(pos, me.position) <= Chores.THUMP_RADIUS * 0.6:
+			inp["interact"] = true
+		else:
+			inp["move"] = _steer(pos, delta) * BOT_PACE
+		return
+	var wall: Object = arena.level.wall_between(me.position, pos).get("panel")
+	if not arena.in_reach(me, _job) or (wall != null and wall != _job):
+		inp["move"] = _steer(pos, delta) * BOT_PACE
+		_job_stalled = 0.0
+		return
+	inp["interact"] = true
+	# Waiting on a second pair of hands (or stuck) for too long? Try something else.
+	var progress := arena.progress_of(_job)
+	if progress > _job_progress + 0.001:
+		_job_progress = progress
+		_job_stalled = 0.0
 	else:
-		inp["move"] = _steer(goal_pos, delta)
+		_job_stalled += delta
+		if _job_stalled >= CLAIM_PATIENCE:
+			_skip[_job] = 4.0
+			_set_job(null)
+
+
+## The job worth the most tidiness per second of this bot's time.
+func _pick_job() -> Object:
+	var scored: Array = []
+	var speed := maxf(float(me.data["speed"]), 20.0)
+	var mine := arena.my_chore(me) if not _generic else Chores.Chore.NONE
+	var own_move := arena.has_owner_move(me) and not _generic
+	var here := arena.level.room_at(me.position)
+	var jobs := arena.open_jobs()
+	for job in jobs:
+		if _skip.has(job):
+			continue
+		var c := arena.chore_of(job)
+		var pos: Vector2 = (job as Node2D).position
+		var travel := Iso.fdist(pos, me.position) / speed
+		if arena.level.room_at(pos) != here:
+			travel += 3.0 * Match.TILE / speed
+		var own := c == mine
+		var work := arena.time_of(job) * (1.0 - arena.progress_of(job)) / Chores.rate(own, c, arena.chore_owners)
+		var value := arena.weight_of(job)
+		if own and own_move:
+			work = 0.1
+			if c == Chores.Chore.FLOOR or c == Chores.Chore.CLUTTER or c == Chores.Chore.STAIN:
+				# Worth more where they're thick on the ground.
+				var reach := Chores.THUMP_RADIUS if c == Chores.Chore.STAIN else 30.0
+				for other: Debris in arena.debris.values():
+					if other != job and other.chore == c and Iso.fdist(other.position, pos) <= reach:
+						value += other.weight
+				work = 0.4 if c == Chores.Chore.STAIN else 0.1
+			elif job is MessItem and job.stray():
+				work = Iso.fdist(job.position, job.home) / speed
+		var score := value / (travel + work + 0.6)
+		if own:
+			score *= 4.0
+		var claimant: int = arena.claims.get(job, 0)
+		var helpers: int = job.helpers if "helpers" in job else 0
+		if Chores.needs_two(c, arena.chore_owners) and not own:
+			# Only worth it with a partner there (or on the way).
+			score *= 1.5 if helpers >= 1 or (claimant != 0 and claimant != me.pid) else 0.05
+		elif claimant != 0 and claimant != me.pid:
+			score *= 0.3
+		scored.append([score, job])
+	if scored.is_empty():
+		return null
+	scored.sort_custom(func(a: Array, b: Array) -> bool: return a[0] > b[0])
+	# Now and then a bot goes for the second or third best, like people do.
+	var k := 0
+	if randf() < 0.15 and _job == null:
+		k = mini(randi_range(1, 2), scored.size() - 1)
+	# Keep going with the current job unless something is clearly better.
+	if arena.is_open(_job):
+		for e: Array in scored:
+			if e[1] == _job and e[0] * 1.5 >= scored[0][0]:
+				return _job
+	return scored[k][1]
 
 
 func _closest_to(pos: Vector2) -> bool:

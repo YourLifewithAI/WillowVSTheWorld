@@ -41,10 +41,7 @@ extends RefCounted
 ##   butterfingers any hit makes you drop the remote
 ##   reboot        extra seconds before respawning after a KO
 ##   dash_mult     shorter (or longer) dash
-##   handy         counts as two helpers when fixing, and tidies fast
-##   strong        counts as two helpers when fixing
-##   playlist      nearby allies tidy faster during cleanup
-##   vacuum        cleans debris just by driving over it (cleanup)
+##   playlist      everyone nearby works faster during cleanup
 ##   clumsy        knocks light things over just by walking into them
 
 enum Team { PETS, ROBOTS }
@@ -78,8 +75,8 @@ const CHARACTERS := {
 		"sneaky": true, "clumsy": true, "voice": "cat", "voice_pitch": 1.15,
 		"strength": "Sneaky: invisible to enemies whenever she sits still. Vanish keeps her invisible on the move, and her first hit from hiding does double damage.",
 		"weakness": "Fragile: the lowest health in the house.",
-		"tidy": 0.75, "carry_speed": 0.8,
-		"tidy_note": "Cats are terrible at chores.",
+		"carry_speed": 0.8,
+		"tidy_note": "Run over books and toys to hide them",
 	},
 	"biscuit": {
 		"name": "Biscuit", "team": Team.PETS, "species": "Chonky Cat", "role": "Demolisher",
@@ -102,8 +99,8 @@ const CHARACTERS := {
 		"sneaky": true, "clumsy": true, "voice": "cat", "voice_pitch": 0.8,
 		"strength": "Heavy: shrugs off half of all knockback. Also a cat, so she vanishes whenever she sits still (which is always).",
 		"weakness": "Slow: the slowest thing in the house, and the bazooka takes a while to reload.",
-		"tidy": 0.6, "carry_speed": 0.75,
-		"tidy_note": "Mostly supervises.",
+		"carry_speed": 0.75,
+		"tidy_note": "Hold {interact} by cushions and saggy couches",
 	},
 	"pepper": {
 		"name": "Pepper", "team": Team.PETS, "species": "Pup", "role": "Tracker",
@@ -126,8 +123,8 @@ const CHARACTERS := {
 			"blurb": "Swaps the gatling for a giant bone. Every whack is a home run, and a dog never lets go of a bone: no dropping the remote while he's holding it."},
 		"strength": "Good Nose: sniffs out invisible cats and hidden Roombas near him, and shows them to his whole team.",
 		"weakness": "Butterfingers: drops the remote whenever he gets hit.",
-		"tidy": 1.25, "carry_speed": 0.9,
-		"tidy_note": "Fetches things back where they belong.",
+		"carry_speed": 0.9,
+		"tidy_note": "Run into knocked-over things",
 	},
 	"kiwi": {
 		"name": "Kiwi", "team": Team.PETS, "species": "Budgie", "role": "Bomber",
@@ -147,15 +144,15 @@ const CHARACTERS := {
 			"blurb": "Calls in the whole flock. A stampede of budgies sweeps the room, bowling everyone over, and Kiwi rides along at top speed."},
 		"strength": "Flight: flies over furniture, bombs whatever is underneath, and can't be caught by slams or suction.",
 		"weakness": "Featherweight: tiny health, and every hit sends her flying 60% further.",
-		"tidy": 1.0, "carry_speed": 0.7,
-		"tidy_note": "Can reach the high shelves.",
+		"carry_speed": 0.7,
+		"tidy_note": "Hold {interact} by pictures and high things",
 	},
 	# ---------------------------------------------------------------- ROBOTS
 	"zoomba": {
 		"name": "Zoomba", "team": Team.ROBOTS, "species": "Robot Vacuum", "role": "Ambusher",
 		"blurb": "Hides under the couch. Waits. Strikes.",
 		"hp": 90, "speed": 155.0, "flying": false, "hover": 0.0,
-		"low_profile": true, "flips": true, "vacuum": true, "voice": "vacuum",
+		"low_profile": true, "flips": true, "voice": "vacuum",
 		"weapon": {"name": "Dust Cannon", "kind": Weapon.SHOT, "damage": 6, "knock": 70.0,
 			"cooldown": 0.55, "speed": 300.0, "range": 70.0, "count": 5, "spread": 36.0,
 			"hit_radius": 5.0, "look": "dust", "demolition": 4.0, "sfx": "dust",
@@ -170,14 +167,14 @@ const CHARACTERS := {
 			"blurb": "Maximum suction. Drags everyone nearby in and swallows anyone who gets too close, remote and all, then spits them across the room."},
 		"strength": "Low Profile: drives under furniture and stays hidden there. Bursting out for a surprise attack does double damage and dazes.",
 		"weakness": "Flips Over: a big hit leaves it upside down and helpless for a second and a half.",
-		"tidy": 1.0, "carry_speed": 0.8,
-		"tidy_note": "Vacuums up debris just by driving over it.",
+		"carry_speed": 0.8,
+		"tidy_note": "Drive over fur, dust and crumbs",
 	},
 	"butler": {
 		"name": "Unit-7", "team": Team.ROBOTS, "species": "Helper Bot", "role": "Engineer",
 		"blurb": "Programmed to serve. Reprogrammed to fire toast.",
 		"hp": 140, "speed": 110.0, "flying": false, "hover": 0.0,
-		"reveal": 120.0, "handy": true, "dash_mult": 0.7, "voice": "robot",
+		"reveal": 120.0, "dash_mult": 0.7, "voice": "robot",
 		"weapon": {"name": "Toaster Cannon", "kind": Weapon.LOB, "damage": 16, "knock": 160.0,
 			"cooldown": 0.6, "speed": 240.0, "range": 110.0, "arc": 20.0, "explode_radius": 18.0,
 			"look": "toast", "demolition": 35.0, "decal": "scorch", "sfx": "toaster", "hit_sfx": "boom",
@@ -191,15 +188,15 @@ const CHARACTERS := {
 		"gag": {"name": "Satellite Laser", "kind": Gag.SATELLITE, "delay": 1.2, "radius": 38.0, "damage": 40,
 			"knock": 320.0, "stun": 0.4, "demolition": 150.0, "reach": 150.0, "scan": 6.0,
 			"blurb": "Calls down an orbital laser on the nearest enemy (or straight ahead). The satellite also scans the house: every hidden pet shows up for the whole robot team."},
-		"strength": "X-Ray Vision + Handy: spots invisible and hidden enemies from far away (for the whole team), and rebuilds anything twice as fast, even big furniture on its own.",
+		"strength": "X-Ray Vision: spots invisible and hidden enemies from far away, for the whole team.",
 		"weakness": "Clunky: slow, with a short, stiff dash.",
-		"tidy": 2.0, "carry_speed": 0.8,
-		"tidy_note": "Literally built for this.",
+		"carry_speed": 0.8,
+		"tidy_note": "Hold {interact} by cracked and broken things",
 	},
 	"claw": {
 		"name": "The Claw", "team": Team.ROBOTS, "species": "Ceiling Gantry", "role": "Wrecker",
 		"blurb": "Rides the ceiling rails. Swings a wrecking ball. Indoors.",
-		"hp": 75, "speed": 140.0, "flying": true, "hover": 40.0, "strong": true, "reboot": 3.0, "voice": "claw",
+		"hp": 75, "speed": 140.0, "flying": true, "hover": 40.0, "reboot": 3.0, "voice": "claw",
 		"weapon": {"name": "Wrecking Ball", "kind": Weapon.MELEE, "damage": 18, "knock": 260.0,
 			"cooldown": 0.75, "range": 32.0, "arc": 200.0, "demolition": 70.0, "sfx": "whoosh",
 			"sprite": "w_wreckingball", "hold": Vector2(0, 5)},
@@ -212,10 +209,10 @@ const CHARACTERS := {
 		"gag": {"name": "Claw Machine", "kind": Gag.CLAW_MACHINE, "radius": 40.0, "hold": 3.0, "damage": 20,
 			"knock": 120.0, "stun": 1.0, "sfx": "claw_machine",
 			"blurb": "Just like the arcade: grabs whoever is underneath and carries them around the ceiling. If they had the remote, it's the Claw's now."},
-		"strength": "Ceiling Rider + Strong: glides over all the furniture, flattens whatever it swings at, and lifts heavy things alone.",
+		"strength": "Ceiling Rider: glides over all the furniture and flattens whatever it swings at.",
 		"weakness": "Long Reboot: takes three extra seconds to come back after a KO.",
-		"tidy": 1.0, "carry_speed": 0.8,
-		"tidy_note": "Lifts heavy things on its own.",
+		"carry_speed": 0.8,
+		"tidy_note": "Hold {interact} by heavy things and wrecks",
 	},
 	"bass": {
 		"name": "Bass", "team": Team.ROBOTS, "species": "Smart Speaker", "role": "Support",
@@ -233,10 +230,10 @@ const CHARACTERS := {
 			"blurb": "An ear-splitting squeal that blasts everyone in front far away (shelves too)."},
 		"gag": {"name": "Dance Party", "kind": Gag.DANCE, "radius": 110.0, "duration": 2.8, "heal": 25, "sfx": "disco",
 			"blurb": "Drops the beat so hard that every enemy nearby has to dance. Allies on the dance floor heal up."},
-		"strength": "Cleaning Playlist: during cleanup, everyone near Bass tidies 30% faster. Its bass waves go straight through furniture.",
+		"strength": "Cleaning Playlist: during cleanup, everyone near Bass works 20% faster. Its bass waves go straight through furniture.",
 		"weakness": "No Legs: hops instead of running, so its dash is tiny.",
-		"tidy": 1.0, "carry_speed": 0.8,
-		"tidy_note": "Cleaning music makes everything go faster.",
+		"carry_speed": 0.8,
+		"tidy_note": "Hold {interact} to THUMP the stains away",
 	},
 }
 
@@ -253,8 +250,21 @@ static func ids_for_team(team: int) -> Array[String]:
 	return out
 
 
+## Kept once loaded: something drawn with draw_texture() in _draw() only holds
+## the texture's id, so a texture nobody else holds on to would be freed straight
+## after (and drawn as a white square).
+static var _textures: Dictionary = {}
+
+
 static func texture(sprite_name: String) -> Texture2D:
-	return load("res://assets/sprites/%s.png" % sprite_name) as Texture2D
+	if not _textures.has(sprite_name):
+		_textures[sprite_name] = load("res://assets/sprites/%s.png" % sprite_name) as Texture2D
+	return _textures[sprite_name]
+
+
+## Lets go of the textures (on the way out, so nothing counts as leaked).
+static func forget_textures() -> void:
+	_textures.clear()
 
 
 ## The weapon (ability 0), special (1), gag (2) or melee move (3) of a character.

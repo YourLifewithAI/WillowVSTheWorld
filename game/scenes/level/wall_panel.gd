@@ -88,6 +88,36 @@ func reach() -> float:
 	return maxf(size.x, size.y) * 11.3
 
 
+## A hole is mended in three steps: the Claw lowers a new panel, Unit-7 tapes
+## it, Kiwi paints it. After the first it's solid again (step > 0 while the
+## rest is still to do). A crack just needs Unit-7.
+func chain() -> Array[int]:
+	if wrecked or step > 0:
+		return [Chores.Chore.LIFT, Chores.Chore.REPAIR, Chores.Chore.HIGH]
+	if cracked():
+		return [Chores.Chore.REPAIR]
+	return []
+
+
+func step_time(_chore: int) -> float:
+	return 2.0 if wrecked or step > 0 else 1.0
+
+
+func step_weight(chore: int) -> float:
+	if not wrecked and step == 0:
+		return 1.0
+	match chore:
+		Chores.Chore.LIFT:
+			return 1.5
+		Chores.Chore.REPAIR:
+			return 1.75
+	return 2.4
+
+
+func shed_budget() -> int:
+	return 0
+
+
 func breakable() -> bool:
 	return surface == WallRun.Surface.DRYWALL
 
@@ -97,8 +127,8 @@ func label() -> String:
 	return run.label
 
 
-func apply_state(hp_frac: float, is_wrecked: bool, progress: float, new_helpers: int) -> void:
-	super.apply_state(hp_frac, is_wrecked, progress, new_helpers)
+func apply_state(hp_frac: float, is_wrecked: bool, progress: float, new_helpers: int, new_step: int = 0) -> void:
+	super.apply_state(hp_frac, is_wrecked, progress, new_helpers, new_step)
 	for s in slices:
 		s.queue_redraw()
 

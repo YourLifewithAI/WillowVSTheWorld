@@ -207,3 +207,12 @@ func find_path(from: Vector2, to: Vector2) -> PackedVector2Array:
 	for p in path:
 		local.append(to_local(p))
 	return local
+
+
+## The nearest point everyone can walk to (so floor mess never lands where
+## nobody can reach it). `p` itself before the navigation is ready.
+func walkable(p: Vector2) -> Vector2:
+	var map := nav_region.get_navigation_map()
+	if NavigationServer2D.map_get_iteration_id(map) == 0:
+		return p
+	return to_local(NavigationServer2D.map_get_closest_point(map, to_global(p)))
