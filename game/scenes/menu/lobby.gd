@@ -23,6 +23,10 @@ var _free: Label
 var _countdown := -1.0
 var _powerups_button: Button
 var _powerups: PowerupsPanel
+## Starting while a controller is connected but nobody's joined with it asks
+## first: pressing start again within this long goes ahead anyway.
+var _confirm_t := 0.0
+const CONFIRM_TIME := 5.0
 
 
 func _ready() -> void:
@@ -41,13 +45,14 @@ func _exit_tree() -> void:
 
 
 func _process(delta: float) -> void:
+	_confirm_t = maxf(0.0, _confirm_t - delta)
 	if _countdown >= 0.0:
 		var before := ceili(_countdown)
 		_countdown -= delta
 		if _countdown <= 0.0:
 			_countdown = -1.0
 			if Net.can_start():
-				Net.start_match()
+				Net.start_match(Net.wants_warmup())
 			return
 		if ceili(_countdown) != before:
 			Audio.play("tick")
@@ -72,8 +77,11 @@ func _process(delta: float) -> void:
 		if n["menu"]:
 			_try_start()
 	var free := Seats.free_controllers()
-	_free.text = "" if free.is_empty() else "Connected but not playing yet: " + ", ".join(free)
-	_free.visible = not free.is_empty()
+	if Seats.solo():
+		_free.text = "Playing alone: the keyboard and every controller move you." if not free.is_empty() else ""
+	else:
+		_free.text = "" if free.is_empty() else "Connected but not playing yet: %s. Press SL + SR on it to join!" % ", ".join(free)
+	_free.visible = _free.text != ""
 
 
 ## A controller's + or -: start the countdown, or call it off.
@@ -83,12 +91,27 @@ func _try_start() -> void:
 	if _countdown >= 0.0:
 		_countdown = -1.0
 		_on_notice("Waiting. Press + or - when everyone's ready.", UiTheme.COCOA)
+	elif Net.can_start() and _someone_left_out():
+		pass
 	elif Net.can_start():
 		Audio.play("start")
 		_countdown = COUNTDOWN
 		_on_notice("Starting in 3...  (+ or - to wait)", Color("3a9f6a"))
 	else:
 		_on_notice("Each side needs at least one player: pick someone from the other team, or add a bot.", Color("e05a5a"))
+
+
+## A controller is connected but nobody has joined with it (and people have
+## joined with others, so it isn't moving anyone): say so the first time, and
+## go ahead if start is pressed again soon after.
+func _someone_left_out() -> bool:
+	if Seats.solo() or Seats.free_controllers().is_empty() or _confirm_t > 0.0:
+		return false
+	_confirm_t = CONFIRM_TIME
+	Audio.play("select")
+	_on_notice("%s is connected but not playing. Press SL + SR on it to join, or start again to go without it."
+		% Seats.free_controllers()[0], Color("e07a2a"))
+	return true
 
 
 ## The powerups menu, for a controller's seat (or -1: the mouse and keyboard).
@@ -191,8 +214,10 @@ func _build() -> void:
 		_start.text = "Start! (parents leave)"
 		_start.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		_start.pressed.connect(func() -> void:
+			if _someone_left_out():
+				return
 			Audio.play("start")
-			Net.start_match())
+			Net.start_match(Net.wants_warmup()))
 		btn_row.add_child(_start)
 
 	# Right: pick a character.
@@ -241,11 +266,14 @@ func _build() -> void:
 			_char_buttons[id] = b
 	if Net.is_host():
 		var join := UiTheme.label("Join: hold a Joy-Con sideways and press SL + SR (two held as one, or a controller: L + R). "
-			+ "Stick: change character.  + or -: start.  Your number is on screen (not the Joy-Con's lights).", 8, UiTheme.COCOA)
+			+ "Stick: change character.  Top button: powerups.  + or -: start (you get a warm-up first).  "
+			+ "Your number is on screen (not the Joy-Con's lights).", 8, UiTheme.COCOA)
 		join.autowrap_mode = TextServer.AUTOWRAP_WORD
 		join.custom_minimum_size.x = 360
 		rcol.add_child(join)
-	_free = UiTheme.label("", 7, UiTheme.COCOA)
+	_free = UiTheme.label("", 8, Color("c0561c"))
+	_free.autowrap_mode = TextServer.AUTOWRAP_WORD
+	_free.custom_minimum_size.x = 360
 	rcol.add_child(_free)
 	_detail = UiTheme.label("", 8)
 	_detail.max_lines_visible = 7

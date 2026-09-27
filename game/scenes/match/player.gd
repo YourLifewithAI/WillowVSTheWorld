@@ -41,6 +41,8 @@ const GAG_CHARGE_TIME := 55.0
 const GAG_PER_DAMAGE := 0.003
 ## Speed while wading through an enemy litter cloud.
 const CLOUD_SLOW := 0.6
+## In the warm-up, the super meter fills this fast (seconds).
+const WARMUP_SUPER_TIME := 5.0
 ## Hold-to-aim (people, not bots): holding attack this long (or, carrying the
 ## remote, the throw button) plants you and the stick only turns you; letting
 ## go fires (or throws). A quick tap fires straight away.
@@ -157,6 +159,9 @@ var _mouse_dist := 0.0
 ## The last diagonal the keys pointed (see _turn).
 var _diag := Vector2.ZERO
 var _diag_t := 10.0
+## Which moves this character has tried (for the warm-up's checklist):
+## "move", "attack", "aim", "special", "interact", "dash", "gag", "pass".
+var tried: Dictionary = {}
 
 # --- Everyone else: smoothing toward the last received position.
 var _net_pos := Vector2.ZERO
@@ -332,7 +337,7 @@ func _owner_tick(delta: float) -> void:
 		return
 	if arena.phase == Match.Phase.WAR and not is_ko:
 		var was_ready := gag_charge >= 1.0
-		gag_charge = minf(1.0, gag_charge + delta / GAG_CHARGE_TIME)
+		gag_charge = minf(1.0, gag_charge + delta / (WARMUP_SUPER_TIME if arena.warmup else GAG_CHARGE_TIME))
 		if gag_charge >= 1.0 and not was_ready and is_local():
 			if arena.shared_screen():
 				sound("gag_ready")
@@ -359,6 +364,10 @@ func _owner_tick(delta: float) -> void:
 	elif steer.length() > 0.2 and _free_aim_t >= FREE_AIM_HOLD:
 		_turn(steer)
 	_diag_t += delta
+	if move.length() > 0.5:
+		tried["move"] = true
+	if aiming:
+		tried["aim"] = true
 
 	var speed: float = data["speed"] * buff_mult
 	if carrying:
@@ -411,6 +420,7 @@ func _owner_tick(delta: float) -> void:
 		_dash_t = DASH_TIME * float(data.get("dash_mult", 1.0))
 		_dash_dir = steer.normalized() if steer.length() > 0.2 else facing
 		dash_cd = DASH_COOLDOWN
+		tried["dash"] = true
 		_play_action.rpc(Action.DASH, facing)
 	if not at_war or carrying or _slam_t > 0.0:
 		return
@@ -578,6 +588,7 @@ func _throw_input(inp: Dictionary, released: String, person: bool) -> void:
 		cone = PASS_CONE_AIMED
 	else:
 		return
+	tried["pass"] = true
 	var mate := pass_target(facing, cone)
 	if mate:
 		var off := Iso.to_floor(_lead(mate) - position)
@@ -737,6 +748,7 @@ func _do_attack() -> void:
 	if not _weapon_is_melee():
 		facing = _assisted(facing, _reach_of(w), 0.0, _lobs(w))
 	attack_cd = w["cooldown"]
+	tried["attack"] = true
 	var ambush := stealthed
 	_break_stealth(0.6)
 	_play_action.rpc(Action.ATTACK, facing)
@@ -751,6 +763,7 @@ func _do_attack() -> void:
 func _do_melee() -> void:
 	var m: Dictionary = data["melee"]
 	melee_cd = float(m["cooldown"])
+	tried["interact"] = true
 	# Swinging up close ties up your hands for a moment: no firing mid-swipe.
 	attack_cd = maxf(attack_cd, MELEE_WEAPON_LOCK)
 	var ambush := stealthed
@@ -794,6 +807,7 @@ func _enemy_ahead(reach: float, half_arc: float) -> bool:
 func _do_gag() -> void:
 	var g: Dictionary = data["gag"]
 	gag_charge = 0.0
+	tried["gag"] = true
 	match int(g["kind"]):
 		Roster.Gag.LITTER:
 			facing = _assisted(facing, float(g["range"]), 0.0, true)
@@ -872,6 +886,7 @@ func _follow_captor() -> void:
 func _do_special() -> void:
 	var sp: Dictionary = data["special"]
 	special_cd = sp["cooldown"]
+	tried["special"] = true
 	var ambush := stealthed
 	if int(sp["kind"]) == Roster.Special.VANISH:
 		vanish_t = float(sp["duration"])

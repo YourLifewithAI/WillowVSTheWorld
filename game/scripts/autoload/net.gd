@@ -30,6 +30,8 @@ var local_char := "willow"
 var map_id := Maps.DEFAULT
 ## Which powerups can turn up (see Pickups.MENU): the host picks, in the lobby.
 var powerups: Array = Pickups.MENU.duplicate()
+## The match being loaded is a warm-up (see Match.warmup).
+var warming_up := false
 var in_match := false
 var online := false
 ## True once a --practice/--host/--join launch option has been used, so
@@ -50,6 +52,7 @@ var autolaunched := false
 ##   --mute            no sound this run;  --audio-log  print every sound as it plays
 ##   --guests=N        host adds N guests on its own screen (tests; drive them with --autopilot)
 ##   --fake-pads=ID:KIND[:SERIAL],...   pretend controllers are plugged in (tests; see Seats)
+##   --warmup=0        start matches from the lobby without the warm-up
 var options: Dictionary = {}
 
 var _next_local_id := -1
@@ -314,10 +317,17 @@ func can_start() -> bool:
 	return is_host() and counts[0] > 0 and counts[1] > 0
 
 
-func start_match() -> void:
+## Starts a match (`warmup`: a warm-up first, see Match.warmup). Starting a
+## warm-up again, while one is on, reloads it (someone joined).
+func start_match(warmup: bool = false) -> void:
 	if not can_start():
 		return
-	_cl_begin_match.rpc(roster, map_id, powerups)
+	_cl_begin_match.rpc(roster, map_id, powerups, warmup)
+
+
+## Should a match started from the lobby begin with a warm-up?
+func wants_warmup() -> bool:
+	return options.get("warmup", "1") != "0" and not options.has("autopilot")
 
 
 func return_to_lobby() -> void:
@@ -377,12 +387,13 @@ func _cl_roster(new_roster: Dictionary, new_map: String, new_powerups: Array) ->
 
 
 @rpc("authority", "call_local", "reliable")
-func _cl_begin_match(final_roster: Dictionary, final_map: String, final_powerups: Array) -> void:
+func _cl_begin_match(final_roster: Dictionary, final_map: String, final_powerups: Array, warmup: bool) -> void:
 	get_tree().paused = false
 	Seats.unmute_all()
 	roster = final_roster
 	map_id = final_map
 	powerups = final_powerups
+	warming_up = warmup
 	in_match = true
 	get_tree().change_scene_to_file(MATCH_SCENE)
 

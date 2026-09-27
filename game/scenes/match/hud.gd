@@ -16,6 +16,7 @@ extends CanvasLayer
 const WAR_HINT := "{move} Move   {attack} Fire (hold to aim)   {special} Special   {interact} Up close / pass the remote   {dash} Dash   {gag} Super   {menu} Menu"
 const KEY_WAR_HINT := "{move} Move   {aim} Aim   {attack} Fire (hold to aim)   {special} Special   {interact} Up close / pass   {dash} Dash   {gag} Super   {menu} Menu"
 const CLEANUP_HINT := "Your face = your job   ·   Grey hand = anyone's   ·   Two dots = two helpers   ·   Hold {interact} to help"
+const WARMUP_HINT := "Try every button, then press {ready} when you're ready   ·   Joy-Con not playing yet? Press SL + SR to join"
 
 var arena: Match
 
@@ -25,6 +26,7 @@ var _score_r: Label
 var _clock: Label
 var _phase: Label
 var _chore_panel: ChorePanel
+var _warmup_panel: WarmupPanel
 ## One per person on this screen: {player, hp, special_bar, dash_bar, gag_bar, gag_label, special_label}.
 var _cards: Array[Dictionary] = []
 var _feed: VBoxContainer
@@ -156,6 +158,11 @@ func _build_scoreboard() -> void:
 	_chore_panel = ChorePanel.new(arena)
 	_chore_panel.position = Vector2(6, 6)
 	_root.add_child(_chore_panel)
+	_warmup_panel = WarmupPanel.new(arena)
+	_warmup_panel.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
+	_warmup_panel.offset_top = 44.0
+	_warmup_panel.offset_bottom = 160.0
+	_root.add_child(_warmup_panel)
 
 
 ## A card per person on this screen: along the bottom when several share it,
@@ -307,8 +314,8 @@ func on_phase_changed() -> void:
 			_phase.text = "GET READY"
 			_hint.text = _war_hint()
 		Match.Phase.WAR:
-			_phase.text = "WAR FOR THE REMOTE"
-			_hint.text = _war_hint()
+			_phase.text = "WARM-UP" if arena.warmup else "WAR FOR THE REMOTE"
+			_hint.text = WARMUP_HINT if arena.warmup else _war_hint()
 		Match.Phase.WHISTLE:
 			_phase.text = "TRUCE!"
 			_hint.text = ""
@@ -355,11 +362,16 @@ func _process(_delta: float) -> void:
 		_clock.text = str(maxi(1, t))
 	elif arena.phase == Match.Phase.RESULTS:
 		_clock.text = "Home!"
+	elif arena.warmup:
+		var people := 0
+		for p: Player in arena.players.values():
+			people += int(not p.is_bot)
+		_clock.text = "%d/%d ready" % [arena.ready_pids.size(), people]
 	for c in _cards:
 		_update_card(c)
 	if _hint.text != "":
 		_hint.seat = _hint_seat()
-		if arena.phase == Match.Phase.WAR or arena.phase == Match.Phase.COUNTDOWN:
+		if (arena.phase == Match.Phase.WAR and not arena.warmup) or arena.phase == Match.Phase.COUNTDOWN:
 			_hint.text = _war_hint()
 	_poll_menus()
 
@@ -440,12 +452,23 @@ func _poll_menus() -> void:
 			if n["ok"]:
 				_pause_buttons[_pause_sel].pressed.emit()
 				return
+		elif n["menu"] and arena.warmup and arena.phase == Match.Phase.WAR:
+			arena.toggle_ready(p)  # (in the warm-up, + or - says you're ready)
 		elif n["menu"] and arena.phase != Match.Phase.RESULTS:
 			_toggle_pause(p.seat)
 			return
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	var key := event as InputEventKey
+	if key and key.pressed and not key.echo and (key.keycode == KEY_ENTER or key.keycode == KEY_KP_ENTER) \
+			and not key.alt_pressed and arena.warmup and arena.phase == Match.Phase.WAR and not _pause:
+		# The keyboard's player says they're ready.
+		for p in arena.local_players():
+			if p.seat == Seats.keyboard_seat():
+				arena.toggle_ready(p)
+		get_viewport().set_input_as_handled()
+		return
 	if event.is_action_pressed("ui_cancel") and arena.phase != Match.Phase.RESULTS:
 		if _lost_panel and not _pause:
 			# Carry on without whoever dropped out (until someone else drops out).
@@ -494,6 +517,14 @@ func _toggle_pause(opener: int = -1) -> void:
 	stay.pressed.connect(_toggle_pause)
 	row.add_child(stay)
 	_pause_buttons = [stay]
+	if Net.is_host() and arena.warmup:
+		var skip := Button.new()
+		skip.text = "Start the match"
+		skip.pressed.connect(func() -> void:
+			get_tree().paused = false
+			arena.skip_warmup())
+		row.add_child(skip)
+		_pause_buttons.append(skip)
 	if Net.is_host():
 		var lobby := Button.new()
 		lobby.text = "Back to lobby"

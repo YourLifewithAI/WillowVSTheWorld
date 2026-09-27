@@ -15,11 +15,12 @@ const FACE := {"left": Vector2(-1, 0), "top": Vector2(0, -1), "right": Vector2(1
 ## Which face button does what (the same on every controller, see Seats).
 const ACTION_FACE := {"attack": "left", "special": "top", "interact": "right", "dash": "bottom"}
 const KEYS := {"attack": "J", "special": "K", "interact": "E", "dash": "Space", "gag": "I", "menu": "Esc",
-	"move": "WASD", "aim": "Mouse"}
+	"move": "WASD", "aim": "Mouse", "ready": "Enter"}
 
 
 ## What to draw for `action` ("attack", "special", "interact", "dash", "gag",
-## "menu", "move" or "aim") for this seat's controller or keyboard.
+## "menu", "move", "aim" or "ready": + in the warm-up, Enter on the keyboard)
+## for this seat's controller or keyboard.
 static func of(seat: int, action: String) -> Dictionary:
 	if not Seats.uses_controller(seat):
 		return {"kind": "key", "text": KEYS.get(action, action)}
@@ -28,7 +29,7 @@ static func of(seat: int, action: String) -> Dictionary:
 	match action:
 		"gag":
 			return {"kind": "shoulder", "text": "SL SR" if Seats.sideways(seat) else "L R"}
-		"menu":
+		"menu", "ready":
 			return {"kind": "menu"}
 	return {"kind": "stick"}
 

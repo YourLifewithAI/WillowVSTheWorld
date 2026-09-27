@@ -126,6 +126,8 @@ class Seat:
 var seats: Array[Seat] = []
 ## Lobby: joining is open (only the host adds people).
 var accepting_joins := false
+## ...including with J on the keyboard (not in the warm-up, where J fires).
+var keyboard_joins := true
 
 var _devices: Dictionary = {}  # joypad id -> {"kind", "serial"}, connected right now
 var _fake: Dictionary = {}  # joypad id -> {"kind", "serial"}, fake controllers for tests
@@ -469,7 +471,7 @@ func _on_join(device: int, side: String) -> void:
 				_claim(s, device, side)
 				changed.emit()
 				return
-	if not accepting_joins:
+	if not accepting_joins or (device == KEYBOARD and not keyboard_joins):
 		return
 	if device == KEYBOARD:
 		# J makes the keyboard P1's, unless a controller already took P1.

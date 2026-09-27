@@ -1,6 +1,6 @@
 extends Node
 ## Shared-screen test with fake controllers (run by tools/smoke_test.sh):
-##   godot --headless --fixed-fps 60 --path game res://tests/couch_test.tscn
+##   godot --headless --fixed-fps 60 --path game res://tests/couch_test.tscn -- --warmup=0
 ##
 ## Plugs in two Joy-Con pairs, a lone left Joy-Con and a Pro-style controller.
 ## Five people join in the lobby (the first pair split between two of them,
