@@ -21,11 +21,12 @@ const PICKUP_RADIUS := 14.0
 const FIX_RADIUS := 24.0
 const DEBRIS_RADIUS := 16.0
 const THROW_SPEED := 260.0
-const THROW_TIME := 0.45
+## How far the remote flies (floor px) when it isn't thrown to anyone in particular.
+const THROW_RANGE := 140.0
 const TIDY_PASS := 0.6
 const TIDY_SPOTLESS := 0.9
 ## Seconds you must stand on your base, unhurt, to change the channel.
-const CHANNEL_TIME := 2.0
+const CHANNEL_TIME := 3.0
 ## Damage multiplier for a hit landed from stealth.
 const AMBUSH_MULT := 2.0
 ## Knockback above this flips a character with the "flips" weakness.
@@ -45,7 +46,9 @@ static var current: Match
 
 @export var war_time := 180.0
 @export var cleanup_time := 45.0
-@export var capture_limit := 5
+## The war ends early at this many captures (0: it runs the full clock, and
+## captures just score).
+@export var capture_limit := 0
 @export var respawn_time := 4.0
 @export var remote_return_time := 8.0
 @export var countdown_time := 3.0
@@ -246,6 +249,14 @@ func _on_seats_changed() -> void:
 	hud.show_lost(lost)
 
 
+## Where the mouse is, in the level's coordinates (the keyboard player aims with it).
+func mouse_in_level() -> Vector2:
+	var box: SubViewportContainer = $World
+	var view: SubViewport = $World/SubViewport
+	var m := box.get_local_mouse_position() * Vector2(view.size) / box.size
+	return level.entities.get_global_transform().affine_inverse() * m
+
+
 ## More than one person is playing on this screen.
 func shared_screen() -> bool:
 	var n := 0
@@ -398,7 +409,7 @@ func _physics_process(delta: float) -> void:
 			_tick_gags(delta)
 			_tick_pickups(delta)
 			_tick_navigation(delta)
-			if time_left <= 0.0 or scores.max() >= capture_limit:
+			if time_left <= 0.0 or (capture_limit > 0 and scores.max() >= capture_limit):
 				_end_war()
 		Phase.WHISTLE:
 			if time_left <= 0.0:
@@ -582,7 +593,7 @@ func _tick_remote(delta: float) -> void:
 				r.timer = 0.0
 			else:
 				r.position = next
-			r.z = sin(clampf(r.timer / THROW_TIME, 0.0, 1.0) * PI) * 14.0
+			r.z = sin(clampf(r.timer / maxf(r.flight, 0.01), 0.0, 1.0) * PI) * 14.0
 			if r.timer <= 0.0:
 				r.z = 0.0
 				_drop_remote(r.position)
@@ -662,15 +673,16 @@ func _cl_remote(state: int, carrier: int, pos: Vector2, pz: float, hold: float) 
 		p.carrying = state == TVRemote.State.CARRIED and p.pid == carrier
 
 
-func request_throw(p: Player, dir: Vector2) -> void:
+## Throws the remote `dist` floor px (to a teammate, see Player.pass_target).
+func request_throw(p: Player, dir: Vector2, dist: float = THROW_RANGE) -> void:
 	if multiplayer.is_server():
-		_srv_throw(p.pid, dir)
+		_srv_throw(p.pid, dir, dist)
 	else:
-		_srv_throw.rpc_id(1, p.pid, dir)
+		_srv_throw.rpc_id(1, p.pid, dir, dist)
 
 
 @rpc("any_peer", "call_remote", "reliable")
-func _srv_throw(pid: int, dir: Vector2) -> void:
+func _srv_throw(pid: int, dir: Vector2, dist: float) -> void:
 	var p: Player = players.get(pid)
 	if p == null or p.get_multiplayer_authority() != _sender():
 		return
@@ -680,7 +692,8 @@ func _srv_throw(pid: int, dir: Vector2) -> void:
 	remote.carrier_pid = 0
 	remote.thrower = pid
 	remote.grace = 0.35
-	remote.timer = THROW_TIME
+	remote.timer = clampf(dist, 16.0, THROW_RANGE) / THROW_SPEED
+	remote.flight = remote.timer
 	remote.position = p.position
 	remote.vel = Iso.to_screen((dir if dir.length() > 0.1 else p.facing).normalized() * THROW_SPEED)
 

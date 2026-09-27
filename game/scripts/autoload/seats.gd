@@ -26,7 +26,13 @@ extends Node
 ##   - anything else is an ordinary gamepad.
 ## Buttons are positional, whatever is printed on them: bottom = dash,
 ## left = attack, top = special, right = throw / hold to tidy, the shoulder
-## buttons (SL/SR on a sideways Joy-Con) = gag, + or - = menu.
+## buttons (SL/SR on a sideways Joy-Con) = super, + or - = menu.
+##
+## Aiming: holding attack plants you and the stick aims (see Player). A
+## controller with a second stick (a Pro Controller, two Joy-Cons held
+## together) aims with it while the first one moves, and so does the mouse
+## for whoever plays on the keyboard (left click attacks, right click is the
+## special) once it moves.
 
 ## Seats were added or removed, or got or lost a controller.
 signal changed
@@ -39,6 +45,10 @@ const MAX_SEATS := 8
 ## The device id used for the keyboard.
 const KEYBOARD := -2
 const DEADZONE := 0.25
+## The aiming stick needs a firmer push (it's easy to nudge by accident).
+const AIM_DEADZONE := 0.35
+## The mouse aims for this long after it last moved or clicked.
+const MOUSE_AIM_TIME := 2.0
 ## One colour per seat (P1..P8) for tags, arrows and HUD cards: the usual
 ## party-game red, blue, yellow, green first.
 const COLORS: Array[Color] = [Color("ff4f7b"), Color("4a7dff"), Color("ffd23f"), Color("3ccf6e"),
@@ -115,6 +125,7 @@ var _devices: Dictionary = {}  # joypad id -> {"kind", "serial"}, connected righ
 var _fake: Dictionary = {}  # joypad id -> {"kind", "serial"}, fake controllers for tests
 var _gesture_prev: Dictionary = {}  # unit key -> join gesture held last frame
 var _latch: Dictionary = {}  # device * 100 + button -> pressed since last read (keeps quick taps)
+var _mouse_t := -100.0  # when the mouse last moved or clicked (seconds)
 
 
 func _ready() -> void:
@@ -284,6 +295,17 @@ func _input(event: InputEvent) -> void:
 	var jb := event as InputEventJoypadButton
 	if jb and jb.pressed:
 		_latch[jb.device * 100 + jb.button_index] = true
+	var mm := event as InputEventMouseMotion
+	if (mm and mm.relative.length() > 1.0) or (event is InputEventMouseButton and event.pressed):
+		_mouse_t = Time.get_ticks_msec() / 1000.0
+
+
+## Is the mouse aiming for whoever plays on the keyboard? (It moved or
+## clicked a moment ago, or a button is held.)
+func mouse_aiming() -> bool:
+	if Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) or Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT):
+		return true
+	return Time.get_ticks_msec() / 1000.0 - _mouse_t < MOUSE_AIM_TIME
 
 
 ## Notices controllers coming and going (polled: Input.joy_connection_changed
@@ -521,10 +543,11 @@ func cycle_character(index: int, step: int) -> void:
 
 # ================================================================ reading
 
-## This seat's controls for one physics tick (the same shape BotBrain returns).
+## This seat's controls for one physics tick (the same shape BotBrain returns,
+## plus "aim": a second stick's direction, and "mouse": the mouse is aiming).
 func read(index: int) -> Dictionary:
 	var out := {"move": Vector2.ZERO, "attack": false, "attack_held": false, "special": false, "dash": false,
-		"gag": false, "interact": false, "interact_pressed": false}
+		"gag": false, "interact": false, "interact_pressed": false, "aim": Vector2.ZERO, "mouse": false}
 	var s := seat(index)
 	if s == null:
 		return out
@@ -540,6 +563,8 @@ func read(index: int) -> Dictionary:
 	if s.muted:
 		return out
 	out["move"] = now["move"]
+	out["aim"] = now["aim"]
+	out["mouse"] = _keyboard_owner() == s and mouse_aiming()
 	out["attack"] = pressed["attack"]
 	out["attack_held"] = now["attack"]
 	out["special"] = pressed["special"]
@@ -642,14 +667,16 @@ func _keyboard_owner() -> Seat:
 
 
 func _seat_state(s: Seat) -> Dictionary:
-	var out := {"move": Vector2.ZERO, "attack": false, "special": false, "dash": false, "interact": false,
-		"gag": false, "menu": false}
+	var out := {"move": Vector2.ZERO, "aim": Vector2.ZERO, "attack": false, "special": false, "dash": false,
+		"interact": false, "gag": false, "menu": false}
 	for u: Array in _seat_units(s):
 		var st := _unit_state(u[0], u[1])
 		out["move"] += st["move"]
+		out["aim"] += st["aim"]
 		for a in ACTIONS:
 			out[a] = out[a] or st[a]
 	out["move"] = out["move"].limit_length(1.0)
+	out["aim"] = out["aim"].limit_length(1.0)
 	return out
 
 
@@ -671,12 +698,15 @@ func _buttons_of(device: int, side: String, actions: Array) -> Array:
 
 ## One controller (or one half of a pair, or the keyboard), right now.
 func _unit_state(device: int, side: String) -> Dictionary:
-	var st := {"move": Vector2.ZERO, "attack": false, "special": false, "dash": false, "interact": false,
-		"gag": false, "menu": false}
+	var st := {"move": Vector2.ZERO, "aim": Vector2.ZERO, "attack": false, "special": false, "dash": false,
+		"interact": false, "gag": false, "menu": false}
 	if device == KEYBOARD:
 		st["move"] = Input.get_vector("move_left", "move_right", "move_up", "move_down")
 		for a in ["attack", "special", "dash", "interact", "gag"]:
 			st[a] = Input.is_action_pressed(a)
+		# Mouse buttons (the keyboard's player aims with the mouse).
+		st["attack"] = st["attack"] or Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
+		st["special"] = st["special"] or Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)
 		return st
 	var d := device
 	var m := _map_of(d, side)
@@ -691,6 +721,9 @@ func _unit_state(device: int, side: String) -> Dictionary:
 		var stick := Vector2(Input.get_joy_axis(d, JOY_AXIS_LEFT_X), Input.get_joy_axis(d, JOY_AXIS_LEFT_Y))
 		var pad := Vector2(float(_b(d, B_RIGHT)) - float(_b(d, B_LEFT)), float(_b(d, B_DOWN)) - float(_b(d, B_UP)))
 		st["move"] = stick + pad
+		# The second stick aims (only a controller held whole has one).
+		var aim := Vector2(Input.get_joy_axis(d, JOY_AXIS_RIGHT_X), Input.get_joy_axis(d, JOY_AXIS_RIGHT_Y))
+		st["aim"] = aim if aim.length() >= AIM_DEADZONE else Vector2.ZERO
 		st["gag"] = st["gag"] or Input.get_joy_axis(d, JOY_AXIS_TRIGGER_LEFT) > 0.5 \
 			or Input.get_joy_axis(d, JOY_AXIS_TRIGGER_RIGHT) > 0.5
 	st["move"] = _deadzone(st["move"])

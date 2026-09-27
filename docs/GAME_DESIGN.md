@@ -36,7 +36,7 @@ place too hard and *everyone* is grounded.
 | Phase | Default length | What happens |
 |---|---|---|
 | Countdown | 3 s | "The parents just left..." Everyone at their base. |
-| **War** | 3:00, or first to **5** captures | Capture the remote. KOs, explosions, wrecked furniture. |
+| **War** | 3:00 on the clock | Capture the remote as often as you can: the team with more captures when time runs out wins. KOs, explosions, wrecked furniture. |
 | Whistle | 3 s | "CAR IN THE DRIVEWAY!" Everyone freezes; KO'd players wake up. |
 | **Cleanup** | 0:45-1:03 (per home) | Everyone to their job: each character cleans up one kind of mess. |
 | Results | until the host continues | The parents' verdict, the TV, the awards. |
@@ -324,9 +324,9 @@ the runs are, where the chokepoints are, how much stuff there is to break.
 | Home | Size | Best for | What makes it different |
 |---|---|---|---|
 | **The Family Home** (default) | 18x18, four rooms | 4-8 | Dining room, kitchen, den and living room in a ring (mirror-symmetric). The pets' base is in the kitchen, the robots' in the den, each behind a door with a second way out through the dining room. The remote sits in the living room, the front-most room, so no wall hides the fight. War 3:00, cleanup 0:58. |
-| **Suburban House** | 22x14, five rooms | 6-8 | A long ranch house: kitchen, dining room and mudroom (pets), living room, garage workshop (robots) and den. Four doors into the living room, so eight players never jam one choke. Long runs; passing matters. War 3:30, cleanup 1:03. |
+| **Suburban House** | 22x14, five rooms | 6-8 | A long ranch house: kitchen, dining room and mudroom (pets), living room, garage workshop (robots) and den. Four doors into the living room, so eight players never jam one choke. Long runs; passing matters. Cleanup 1:03. |
 | **The Farmhouse** | 17x17, four rooms and a porch | 4-6 | Pantry, mudroom (pets), workshop (robots) and a farm kitchen around an old stone chimney that never breaks. A porch runs round the outside, so every base has three ways out. Cleanup 0:54. |
-| **Studio Apartment** | 12x12, one room | 2-4 | Bed, desk and kitchenette crammed together. Short runs, constant brawling, a milk jug that has escaped the fridge. War 2:30, cleanup 0:45. |
+| **Studio Apartment** | 12x12, one room | 2-4 | Bed, desk and kitchenette crammed together. Short runs, constant brawling, a milk jug that has escaped the fridge. Cleanup 0:45. |
 | **The Living Room (classic)** | 16x16, one room | 4-6 | The original: open, symmetric, easy to read. No walls, so it's the place to learn. Cleanup 0:50. |
 
 **The whole house fits on one screen.** The game draws at 640x360 and scales by
@@ -589,9 +589,10 @@ tools/smoke_test.sh             headless end-to-end tests
 | Chores: owners, rates, job times and weights | `Chores` (`game/scripts/core/chores.gd`) | see *Phase 2* |
 | Heavy threshold | `MessItem` | 200 force |
 
-**Playtest notes so far (bots only):** a 3v3 bot war reaches 5 captures in
-~60-100 s with 15-40 KOs. For cleanup calibration see *Phase 2*; the numbers
-need tuning against **human** playtests.
+**Playtest notes:** the first couch playtest found the war far too short (it
+used to end at the first team to 5 captures, which took 30-100 s), so it now
+always runs its full 3 minutes and captures take 3 s instead of 2. For cleanup
+calibration see *Phase 2*; the numbers need tuning against **human** playtests.
 
 ## Roadmap
 

@@ -125,6 +125,15 @@ if grep -q "FAIL  melee:" "$OUT/melee.log" || ! grep -q "^\[melee\] [0-9]* passe
   FAILED=1
 fi
 
+echo "== Aiming: tap to fire, hold to aim, a second stick, keyboard diagonals, passing the remote"
+"$GODOT" --headless --fixed-fps 60 --path "$GAME" res://tests/aim_test.tscn -- --war=300 --pickups=0 \
+  > "$OUT/aim.log" 2>&1
+no_script_errors "$OUT/aim.log" "aim"
+grep -E "^  (PASS|FAIL)  aim:" "$OUT/aim.log"
+if grep -q "FAIL  aim:" "$OUT/aim.log" || ! grep -q "^\[aim\] [0-9]* passed, 0 failed" "$OUT/aim.log"; then
+  FAILED=1
+fi
+
 echo "== Network match (host with a guest on its screen + a client, over localhost, real time, ~70s)"
 "$GODOT" --headless --path "$GAME" -- --host --name=Host --map=farmhouse --bots=2 --guests=1 --autostart=2 --autopilot \
   --war=30 --cleanup=15 --quit-after=62 > "$OUT/host.log" 2>&1 &

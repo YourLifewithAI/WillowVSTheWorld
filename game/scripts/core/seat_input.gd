@@ -7,6 +7,7 @@ var seat := 0
 
 func _init(seat_index: int) -> void:
 	seat = seat_index
+	hold_to_aim = true
 
 
 func think() -> Dictionary:

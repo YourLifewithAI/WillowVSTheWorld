@@ -22,7 +22,7 @@ const LIST := {
 		"name": "Studio Apartment", "home": "City studio",
 		"blurb": "Bed, desk and kitchenette in one tiny room. Short runs, constant chaos.",
 		"players": "2-4", "scene": "res://scenes/maps/studio.tscn",
-		"war_time": 150.0, "cleanup_time": 45.0,
+		"cleanup_time": 45.0,
 	},
 	"farmhouse": {
 		"name": "The Farmhouse", "home": "Country farmhouse",
@@ -34,7 +34,7 @@ const LIST := {
 		"name": "Suburban House", "home": "Big house in the suburbs",
 		"blurb": "A long ranch house: kitchen, dining room, living room, garage and den. Long runs, so passing matters.",
 		"players": "6-8", "scene": "res://scenes/maps/suburbs.tscn",
-		"war_time": 210.0, "cleanup_time": 63.0,
+		"cleanup_time": 63.0,
 	},
 }
 

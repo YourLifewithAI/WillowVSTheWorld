@@ -8,7 +8,7 @@ pulls back into the driveway.
 ![Pets and robots fighting over the remote in the living room](docs/images/war.gif)
 
 **Phase 1: War for the remote.** Team capture-the-flag with over-the-top weapons.
-Grab the remote, carry it to your team's rug, and hold it there for two seconds to
+Grab the remote, carry it to your team's rug, and hold it there for three seconds to
 change the channel. Blast anyone who tries, and the furniture too. KOs are just naps.
 
 **Phase 2: Cover it up.** *CAR IN THE DRIVEWAY!* Truce. Everyone, both teams,
