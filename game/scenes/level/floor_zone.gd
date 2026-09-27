@@ -21,6 +21,8 @@ enum Style { WOOD, TILES, CARPET, RUG }
 	set(v):
 		colors = v
 		queue_redraw()
+## For a whole room's floor: its name ("Kitchen"), used by the feed and bots.
+@export var room_name := ""
 
 
 func _ready() -> void:

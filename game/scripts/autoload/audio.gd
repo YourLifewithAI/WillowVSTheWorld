@@ -74,6 +74,7 @@ func quit_game() -> void:
 			p.call("stop")
 	_music.stop()
 	_music_old.stop()
+	Roster.forget_textures()
 	# The mixer lets go of stopped sounds on its own thread, and the engine only
 	# frees them between frames, so give it a few of each.
 	for i in 6:

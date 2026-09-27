@@ -58,3 +58,18 @@ static func ellipse(radius: float, segments: int = 24) -> PackedVector2Array:
 		var a := TAU * s / segments
 		pts.append(Vector2(cos(a) * radius, sin(a) * radius * 0.5))
 	return pts
+
+
+## The point on segment a-b closest to p (screen space, measured on the floor).
+static func closest_on_segment(p: Vector2, a: Vector2, b: Vector2) -> Vector2:
+	var ab := to_floor(b - a)
+	var len2 := ab.length_squared()
+	if len2 < 0.0001:
+		return a
+	var t := clampf(to_floor(p - a).dot(ab) / len2, 0.0, 1.0)
+	return a + (b - a) * t
+
+
+## Floor distance from p to the segment a-b.
+static func segment_fdist(p: Vector2, a: Vector2, b: Vector2) -> float:
+	return fdist(p, closest_on_segment(p, a, b))

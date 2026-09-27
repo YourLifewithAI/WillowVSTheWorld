@@ -122,6 +122,17 @@ func _build() -> void:
 		_parade.append(icon)
 
 
+## Any face button or + / - on a controller goes straight to Practice (the
+## lobby is where everyone joins). Controllers never move this menu's focus,
+## so they can't reach Host, Join or Quit.
+func _unhandled_input(event: InputEvent) -> void:
+	var jb := event as InputEventJoypadButton
+	if jb and jb.pressed and jb.button_index in [JOY_BUTTON_A, JOY_BUTTON_B, JOY_BUTTON_X, JOY_BUTTON_Y,
+			JOY_BUTTON_START, JOY_BUTTON_BACK, JOY_BUTTON_DPAD_LEFT, JOY_BUTTON_DPAD_RIGHT, JOY_BUTTON_DPAD_UP, JOY_BUTTON_DPAD_DOWN]:
+		get_viewport().set_input_as_handled()
+		Net.practice()
+
+
 func _process(delta: float) -> void:
 	_t += delta
 	for k in _parade.size():

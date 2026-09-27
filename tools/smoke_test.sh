@@ -45,7 +45,7 @@ for M in $(grep -rohE 'Audio\.music(_after)?\("[a-z_]+"' "$GAME/scenes" "$GAME/s
 done
 if [ -z "$MISSING" ]; then pass "all $(echo $NAMES | tr ' ' '\n' | sort -u | wc -l) sounds found"; else fail "missing sounds:$MISSING"; fi
 
-MAPS="living_room studio farmhouse suburbs"
+MAPS="family_home suburbs farmhouse studio living_room"
 for MAP in $MAPS; do
   echo "== Practice match on $MAP (3v3 bots, simulated as fast as possible)"
   LOG="$OUT/practice_$MAP.log"
@@ -59,6 +59,16 @@ for MAP in $MAPS; do
   if grep -q "] ko " "$LOG"; then pass "$MAP had KOs"; else fail "$MAP had no KOs"; fi
   if grep -q "] knocked " "$LOG"; then pass "$MAP made a mess"; else fail "$MAP: nothing got knocked over"; fi
   if grep -q "score team=" "$LOG"; then pass "$MAP: bots found their way to a base"; else fail "$MAP: nobody scored (bots stuck?)"; fi
+  if grep -qE "chore [A-Z]+: [0-9]+ jobs, weight" "$LOG" && grep -qE "chore [A-Z]+: done [0-9]+ \(owner" "$LOG"; then
+    pass "$MAP: cleanup logged every chore ($(grep -cE 'chore [A-Z]+: done' "$LOG") chores worked on)"
+  else
+    fail "$MAP: no per-chore cleanup log"
+  fi
+  if grep -q "\] pickup " "$LOG"; then
+    pass "$MAP: things popped up and got picked up ($(grep -c '\] pickup ' "$LOG"))"
+  else
+    fail "$MAP: no pickups picked up"
+  fi
   for cue in "parents_leave" "whistle" "car_horn" "music war" "music cleanup"; do
     grep -q "\[audio\] $cue\$" "$LOG" || MISSED_CUE="$cue"
   done
@@ -70,8 +80,53 @@ for MAP in $MAPS; do
   unset MISSED_CUE
 done
 
-echo "== Network match (host + client over localhost, real time, ~70s)"
-"$GODOT" --headless --path "$GAME" -- --host --name=Host --map=farmhouse --bots=2 --autostart=2 --autopilot \
+echo "== Shared screen: four people on fake Joy-Cons and a controller"
+"$GODOT" --headless --fixed-fps 60 --path "$GAME" res://tests/couch_test.tscn -- --war=60 --cleanup=5 --pickups=0 \
+  > "$OUT/couch.log" 2>&1
+no_script_errors "$OUT/couch.log" "couch"
+grep -E "^  (PASS|FAIL)  couch:" "$OUT/couch.log"
+if grep -q "FAIL  couch:" "$OUT/couch.log" || ! grep -q "^\[couch\] [0-9]* passed, 0 failed" "$OUT/couch.log"; then
+  FAILED=1
+fi
+
+echo "== Walls: what breaks them, what they stop, and the bots' routes"
+"$GODOT" --headless --fixed-fps 60 --path "$GAME" res://tests/walls_test.tscn -- --war=300 \
+  > "$OUT/walls.log" 2>&1
+no_script_errors "$OUT/walls.log" "walls"
+grep -E "^  (PASS|FAIL)  walls:" "$OUT/walls.log"
+if grep -q "FAIL  walls:" "$OUT/walls.log" || ! grep -q "^\[walls\] [0-9]* passed, 0 failed" "$OUT/walls.log"; then
+  FAILED=1
+fi
+
+echo "== Cleanup by specialty: who owns what, work rates, repair steps, each character's own way of cleaning"
+"$GODOT" --headless --fixed-fps 60 --path "$GAME" res://tests/chores_test.tscn -- --war=300 \
+  > "$OUT/chores.log" 2>&1
+no_script_errors "$OUT/chores.log" "chores"
+grep -E "^  (PASS|FAIL)  chores:" "$OUT/chores.log"
+if grep -q "FAIL  chores:" "$OUT/chores.log" || ! grep -q "^\[chores\] [0-9]* passed, 0 failed" "$OUT/chores.log"; then
+  FAILED=1
+fi
+
+echo "== Pickups: power-ups, borrowed weapons, turbo tools"
+"$GODOT" --headless --fixed-fps 60 --path "$GAME" res://tests/pickups_test.tscn -- --war=300 \
+  > "$OUT/pickups.log" 2>&1
+no_script_errors "$OUT/pickups.log" "pickups"
+grep -E "^  (PASS|FAIL)  pickups:" "$OUT/pickups.log"
+if grep -q "FAIL  pickups:" "$OUT/pickups.log" || ! grep -q "^\[pickups\] [0-9]* passed, 0 failed" "$OUT/pickups.log"; then
+  FAILED=1
+fi
+
+echo "== Close-up moves: every character's, and what each one does"
+"$GODOT" --headless --fixed-fps 60 --path "$GAME" res://tests/melee_test.tscn -- --war=120 \
+  > "$OUT/melee.log" 2>&1
+no_script_errors "$OUT/melee.log" "melee"
+grep -E "^  (PASS|FAIL)  melee:" "$OUT/melee.log"
+if grep -q "FAIL  melee:" "$OUT/melee.log" || ! grep -q "^\[melee\] [0-9]* passed, 0 failed" "$OUT/melee.log"; then
+  FAILED=1
+fi
+
+echo "== Network match (host with a guest on its screen + a client, over localhost, real time, ~70s)"
+"$GODOT" --headless --path "$GAME" -- --host --name=Host --map=farmhouse --bots=2 --guests=1 --autostart=2 --autopilot \
   --war=30 --cleanup=15 --quit-after=62 > "$OUT/host.log" 2>&1 &
 HOST_PID=$!
 sleep 3
@@ -81,6 +136,17 @@ wait $HOST_PID
 no_script_errors "$OUT/host.log" "host"
 no_script_errors "$OUT/client.log" "client"
 if grep -q "map farmhouse" "$OUT/client.log"; then pass "the client loaded the host's map"; else fail "the client didn't load the host's map"; fi
+if grep -q "players 5 (2 on this screen)" "$OUT/host.log" && grep -q "players 5 (1 on this screen)" "$OUT/client.log"; then
+  pass "host (you + a guest), client and 2 bots all in the match on both machines"
+else
+  fail "player counts differ: host '$(grep -o 'players [0-9]* ([0-9]* on this screen)' "$OUT/host.log" | head -1)' client '$(grep -o 'players [0-9]* ([0-9]* on this screen)' "$OUT/client.log" | head -1)'"
+fi
+LOADED="$(grep -o 'everyone loaded after [0-9.]*' "$OUT/host.log" | head -1 | grep -o '[0-9.]*$')"
+if [ -n "$LOADED" ] && awk "BEGIN{exit !($LOADED < 3)}"; then
+  pass "the match started as soon as the client loaded (${LOADED}s), not after the 8 s timeout"
+else
+  fail "the match waited for the load timeout (${LOADED:-never}s)"
+fi
 HOST_RESULT="$(grep -o 'results tidy=.*' "$OUT/host.log" | head -1)"
 CLIENT_RESULT="$(grep -o 'results tidy=.*' "$OUT/client.log" | head -1)"
 if [ -n "$HOST_RESULT" ] && [ "$HOST_RESULT" = "$CLIENT_RESULT" ]; then

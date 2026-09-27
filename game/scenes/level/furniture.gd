@@ -9,7 +9,7 @@ extends StaticBody2D
 ## characters being launched into it) and has to be rebuilt during cleanup.
 ## The host owns its health; every peer mirrors it through apply_state().
 
-enum Style { BOX, ARMCHAIR, COUCH, TABLE, TV, CAT_TREE, DOCK, BED, COUNTER, STOVE, FRIDGE, DESK, BEANBAG, WALL, PET_BED }
+enum Style { BOX, ARMCHAIR, COUCH, TABLE, TV, CAT_TREE, DOCK, BED, COUNTER, STOVE, FRIDGE, DESK, BEANBAG, WALL, PET_BED, HOUSE_WALL, STAIRS }
 enum Detail { NONE, SINK, BURNERS }
 
 @export var style: Style = Style.BOX:
@@ -52,6 +52,12 @@ enum Detail { NONE, SINK, BURNERS }
 ## How much punishment it takes before it's wrecked.
 ## -1 picks a value for the style; 0 makes it indestructible.
 @export var sturdiness := -1.0
+## Hits weaker than this do no damage at all (a laser just goes "tink").
+@export var min_hit := 0.0
+## How much of the footprint is solid (a little less than drawn, so characters
+## can squeeze past neighbouring pieces), and the physics layer it's on.
+@export var footprint_scale := 0.92
+@export var collision_layer_value := 2
 
 ## For Style.TV: -1 = off, otherwise the team whose show is on.
 var channel := -1:
@@ -64,15 +70,23 @@ const STURDINESS := {
 	Style.BOX: 40.0, Style.ARMCHAIR: 55.0, Style.COUCH: 80.0, Style.TABLE: 40.0, Style.TV: 0.0,
 	Style.CAT_TREE: 0.0, Style.DOCK: 0.0, Style.BED: 80.0, Style.COUNTER: 90.0, Style.STOVE: 0.0,
 	Style.FRIDGE: 110.0, Style.DESK: 45.0, Style.BEANBAG: 20.0, Style.WALL: 60.0, Style.PET_BED: 0.0,
+	Style.HOUSE_WALL: 150.0, Style.STAIRS: 0.0,
 }
 
 var index := -1
 var max_hp := 0.0
 var hp := 0.0
 var wrecked := false
-## 0..1 progress of putting it back together during cleanup.
+## Cleanup: which step of its repair chain it's on (see chain()), and 0..1
+## progress on that step.
+var step := 0
 var rebuild := 0.0
 var helpers := 0
+## Its owner is the one working on it (a green bar; anyone else's is grey).
+var owner_working := false
+## Host only: damage since it last shed clutter or a pillow, and how many it has left.
+var shed_damage := 0.0
+var shed_left := -1
 
 var _boxes: Array[Dictionary] = []
 var _poly: CollisionPolygon2D
@@ -81,7 +95,7 @@ var _t := 0.0
 
 
 func _ready() -> void:
-	collision_layer = 2
+	collision_layer = collision_layer_value
 	collision_mask = 0
 	max_hp = sturdiness if sturdiness >= 0.0 else float(STURDINESS.get(style, 60.0))
 	hp = max_hp
@@ -89,7 +103,7 @@ func _ready() -> void:
 		return
 	if solid:
 		_poly = CollisionPolygon2D.new()
-		_poly.polygon = Iso.footprint(size * 0.92)
+		_poly.polygon = Iso.footprint(size * footprint_scale)
 		add_child(_poly)
 	_overlay = Node2D.new()
 	_overlay.z_index = 20
@@ -106,24 +120,90 @@ func reach() -> float:
 	return maxf(size.x, size.y) * 11.3
 
 
-## How much a wreck counts against the house's tidiness.
+## Roughly how far `p` is from the edge of this piece, in floor pixels.
+func distance_to(p: Vector2) -> float:
+	return Iso.fdist(p, position) - reach()
+
+
+## Soft furnishings are Biscuit's to knead back into shape; the rest are Unit-7's to fix.
+func is_soft() -> bool:
+	return style in [Style.COUCH, Style.ARMCHAIR, Style.BED, Style.BEANBAG]
+
+
+## Cracked: damaged but still standing (a repair job in cleanup).
+func cracked() -> bool:
+	return max_hp > 0.0 and not wrecked and hp < max_hp * 0.66
+
+
+## The chores that put it right, in order (see Chores): a wreck is stood back up
+## by the Claw, then fixed or kneaded; a crack just needs fixing or kneading.
+func chain() -> Array[int]:
+	var fix := Chores.Chore.SOFT if is_soft() else Chores.Chore.REPAIR
+	if wrecked:
+		return [Chores.Chore.LIFT, fix]
+	if cracked():
+		return [fix]
+	return []
+
+
+## The chore it needs next (Chores.Chore.NONE when it's fine).
+func current_chore() -> int:
+	var c := chain()
+	return c[step] if step < c.size() else Chores.Chore.NONE
+
+
+## Seconds of work (at rate 1) and tidiness weight of each step.
+func step_time(chore: int) -> float:
+	var area := size.x * size.y
+	if not wrecked:
+		return 1.4 if chore == Chores.Chore.SOFT else 1.0
+	match chore:
+		Chores.Chore.LIFT:
+			return 1.0 + 0.4 * area
+		Chores.Chore.SOFT:
+			return 1.5 + 0.75 * area
+	return 1.2 + 0.6 * area
+
+
+func step_weight(chore: int) -> float:
+	var area := size.x * size.y
+	if not wrecked:
+		return 2.2 if chore == Chores.Chore.SOFT else 1.0
+	match chore:
+		Chores.Chore.LIFT:
+			return 0.75 + 0.3 * area
+		Chores.Chore.SOFT:
+			return 1.9 + 1.0 * area
+	return 1.3 + 0.65 * area
+
+
+## How much it still counts against the house's tidiness.
 func weight() -> float:
-	return 2.0 + size.x * size.y
+	var c := chain()
+	var w := 0.0
+	for k in range(step, c.size()):
+		w += step_weight(c[k])
+	return w
 
 
-func rebuild_time() -> float:
-	return 4.0 + size.x * size.y * 1.5
+## How many clutter bits (or pillows, for soft pieces) it sheds as it's knocked about.
+func shed_budget() -> int:
+	match style:
+		Style.BOX, Style.DESK, Style.COUCH:
+			return 3
+		Style.TABLE, Style.COUNTER, Style.FRIDGE, Style.BED, Style.ARMCHAIR:
+			return 2
+		Style.BEANBAG:
+			return 1
+	return 0
 
 
-func required_lift() -> int:
-	return 2
-
-
-## Mirrors the host's view: health fraction, wrecked or not, rebuild progress.
-func apply_state(hp_frac: float, is_wrecked: bool, progress: float, new_helpers: int) -> void:
+## Mirrors the host's view: health fraction, wrecked or not, repair step and progress.
+func apply_state(hp_frac: float, is_wrecked: bool, progress: float, new_helpers: int, new_step: int = 0) -> void:
 	hp = hp_frac * max_hp
 	rebuild = progress
 	helpers = new_helpers
+	step = new_step
 	if is_wrecked != wrecked:
 		wrecked = is_wrecked
 		if _poly:
@@ -134,25 +214,25 @@ func apply_state(hp_frac: float, is_wrecked: bool, progress: float, new_helpers:
 
 
 func _process(delta: float) -> void:
-	if Engine.is_editor_hint() or not wrecked:
+	if Engine.is_editor_hint() or current_chore() == Chores.Chore.NONE:
 		return
 	_t += delta
 	_overlay.queue_redraw()
 
 
+## The job marker in cleanup (see JobBadge): whose step it is now, and the
+## faces of the steps still to come.
 func _draw_overlay() -> void:
-	if not wrecked or Match.current == null or Match.current.phase != Match.Phase.CLEANUP:
+	var arena := Match.current
+	if arena == null or arena.phase != Match.Phase.CLEANUP or current_chore() == Chores.Chore.NONE:
 		return
-	var top := Vector2(0, -18)
-	var bob := sin(_t * 5.0) * 1.5
-	var c := Color("ffd84d") if rebuild <= 0.0 else Color("8ff0a4")
-	_overlay.draw_colored_polygon(PackedVector2Array([top + Vector2(-4, bob - 5), top + Vector2(4, bob - 5), top + Vector2(0, bob)]), c)
-	if helpers < required_lift():
-		_overlay.draw_string(ThemeDB.fallback_font, top + Vector2(-5, bob - 7), "x2", HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color.WHITE)
-	if rebuild > 0.0:
-		var bar := Rect2(top + Vector2(-10, 2), Vector2(20, 3))
-		_overlay.draw_rect(bar.grow(1), OUTLINE)
-		_overlay.draw_rect(Rect2(bar.position, Vector2(bar.size.x * rebuild, bar.size.y)), Color("8ff0a4"))
+	var c := chain()
+	JobBadge.draw(_overlay, _badge_at(), arena, c[step], rebuild, helpers, owner_working, _t, c.slice(step + 1))
+
+
+## Where the job badge sits: over the top of the piece.
+func _badge_at() -> Vector2:
+	return Vector2(0, -18.0 if wrecked and step == 0 else -height - 10.0)
 
 
 ## This piece's own (i, j) axes -> the room's tile axes, honouring flip/mirror.
@@ -170,7 +250,7 @@ func _draw() -> void:
 	var w := size.y if mirror else size.x
 	var d := size.x if mirror else size.y
 	_boxes.clear()
-	if wrecked:
+	if wrecked and step == 0:
 		_draw_rubble(w, d)
 		return
 	match style:
@@ -228,9 +308,17 @@ func _draw() -> void:
 			_box(Vector2.ZERO, Vector2(w, d), 0, height, color)
 		Style.BEANBAG, Style.PET_BED:
 			pass  # Drawn in _draw_details.
+		Style.STAIRS:
+			# Steps climbing toward the back (its own -i side), with a banister.
+			var steps := 6
+			for k in steps:
+				var depth := w / steps
+				_box(Vector2(w * 0.5 - depth * (k + 0.5), 0), Vector2(depth, d), 0, height * (k + 1) / steps,
+					color if k % 2 == 0 else color.darkened(0.06))
+			_box(Vector2(0, d * 0.5 - 0.05), Vector2(w, 0.1), height * 0.5, height + 8, accent)
 	_flush_boxes()
 	_draw_details(w, d)
-	if max_hp > 0.0 and hp < max_hp * 0.66:
+	if max_hp > 0.0 and (hp < max_hp * 0.66 or wrecked):
 		_draw_cracks(w, d)
 
 

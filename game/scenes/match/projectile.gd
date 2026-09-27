@@ -25,6 +25,7 @@ var _hit: Dictionary = {}
 var _sprite: Sprite2D
 var _t := 0.0
 var _done := false
+var _first := true
 
 const SPRITES := {"ball": "p_ball", "rocket": "p_rocket", "egg": "p_egg", "toast": "p_toast",
 	"feather": "feather", "rocket_fist": "rocket_fist", "litter": "p_litter"}
@@ -33,13 +34,13 @@ const SPRITES := {"ball": "p_ball", "rocket": "p_rocket", "egg": "p_egg", "toast
 func setup(from: Player, which: int, direction: Vector2, id: int, is_authoritative: bool, from_ambush: bool) -> void:
 	shooter = from
 	ability = which
-	spec = Roster.ability(from.data, which)
+	spec = from.ability_spec(which)
 	dir = direction.normalized()
 	authoritative = is_authoritative
 	ambush = from_ambush
 	proj_id = id
 	# Lobbed weapons, and the Litter Bomb gag (the only gag that's thrown).
-	lob = (which == 0 and int(spec["kind"]) == Roster.Weapon.LOB) or which == 2
+	lob = ((which == 0 or which == 4) and int(spec["kind"]) == Roster.Weapon.LOB) or which == 2
 	name = "Proj_%d_%d" % [from.pid, id]
 	position = from.position + Iso.to_screen(dir * (3.0 if lob else 8.0))
 	_start_z = maxf(from.z, 8.0) if lob else HEIGHT + from.z * 0.5
@@ -65,6 +66,10 @@ func _physics_process(delta: float) -> void:
 		queue_free()
 		return
 	_t += delta
+	# The first step starts from the shooter's centre: someone hugging a wall
+	# spawns their shot a little way ahead, possibly inside it.
+	var from := shooter.position if _first else position
+	_first = false
 	var step := dir * float(spec["speed"]) * delta
 	position += Iso.to_screen(step)
 	_travelled += step.length()
@@ -72,6 +77,18 @@ func _physics_process(delta: float) -> void:
 	if lob:
 		var k := clampf(_travelled / reach, 0.0, 1.0)
 		z = _start_z * (1.0 - k) + float(spec.get("arc", 0.0)) * 4.0 * k * (1.0 - k)
+	# Walls. Shells sail over while they're higher than the wall (as drawn).
+	if not spec.get("through_walls", false) and (not lob or z < WallRun.HEIGHT):
+		var hit := arena.level.wall_between(from, position)
+		if not hit.is_empty():
+			position = hit["point"] - Iso.to_screen(dir * 2.0)
+			if lob:
+				_explode(arena)
+			else:
+				_hit_wall(arena, hit["panel"])
+			return
+	if lob:
+		var k := clampf(_travelled / reach, 0.0, 1.0)
 		if k >= 1.0 or not arena.level.room.contains(position, 0.05):
 			_explode(arena)
 		queue_redraw()
@@ -87,7 +104,7 @@ func _physics_process(delta: float) -> void:
 		if f and not _hit.has(f):
 			_hit[f] = true
 			if authoritative:
-				arena.report_furniture_hit(f, float(spec.get("demolition", 0.0)))
+				arena.report_furniture_hit(f, float(spec.get("demolition", 0.0)), shooter, ability)
 			if not spec.get("through_walls", false):
 				Fx.burst(arena.level.entities, position + Vector2(0, -z), Color.WHITE)
 				Audio.play_at("thud", arena.level.entities, position, -6.0)
@@ -109,6 +126,24 @@ func _physics_process(delta: float) -> void:
 		if not _hit.has(item) and Iso.fdist(position, item.position) <= hit_reach:
 			_hit[item] = true
 			arena.report_mess_hit(item, float(spec["knock"]), Iso.to_floor(item.position - position))
+
+
+## A straight shot stops at a wall: a crunch if it's hard enough to hurt it,
+## otherwise just a "tink" (every machine shows this from its own copy).
+func _hit_wall(arena: Match, panel: WallPanel) -> void:
+	_done = true
+	var demolition := float(spec.get("demolition", 0.0))
+	var hurts := panel.can_be_damaged() and demolition >= panel.min_hit
+	if hurts:
+		Fx.burst(arena.level.entities, position + Vector2(0, -z), Color("fff8ef"))
+		if authoritative:
+			arena.report_furniture_hit(panel, demolition, shooter, ability)
+	else:
+		Fx.puff(arena.level.entities, position + Vector2(0, -z), Color(1, 1, 1, 0.7))
+		Audio.play_at("tink", arena.level.entities, position, -4.0)
+		if authoritative:
+			arena.report_furniture_hit(panel, 0.0, shooter, ability)  # it still knocks the pictures off
+	queue_free()
 
 
 func _explode(arena: Match) -> void:

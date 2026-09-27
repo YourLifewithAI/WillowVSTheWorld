@@ -13,7 +13,7 @@ extends CharacterBody2D
 ## draw a hidden character: invisible to enemies, ghostly to teammates, and
 ## visible to enemies who have a nose or x-ray vision nearby (Match.is_revealed).
 
-enum Action { ATTACK, SPECIAL, DASH, GAG }
+enum Action { ATTACK, SPECIAL, DASH, GAG, MELEE }
 ## How a character can be held by an enemy's gag.
 enum Capture { NONE, SWALLOWED, GRABBED }
 
@@ -25,6 +25,12 @@ const KNOCK_DECAY := 7.0
 const TUMBLE_SPEED := 140.0
 ## Body radius on the floor, used for hit checks.
 const BODY_RADIUS := 7.0
+## How high a flyer can manage while carrying the remote (below the walls' tops).
+const CARRY_HOVER := 6.0
+## How long a knockup keeps you in the air (just a visual; the stun does the rest).
+const HOP_TIME := 0.5
+## After a close-up move, how long before your weapon can fire again.
+const MELEE_WEAPON_LOCK := 0.25
 ## Seconds of standing still before a sneaky cat disappears.
 const SNEAK_DELAY := 1.0
 ## Damage done to furniture by a character slamming into it.
@@ -42,8 +48,11 @@ var data: Dictionary = {}
 var team := 0
 var display_name := ""
 var is_bot := false
-## Drives this character instead of the keyboard (bots and --autopilot).
-var brain: BotBrain
+## Whatever drives this character on this machine: a person's seat (SeatInput)
+## or a bot (BotBrain). Remote players have none.
+var brain: Controls
+## Which seat on this screen plays this character (-1: a bot or someone elsewhere).
+var seat := -1
 var arena: Match
 
 # --- Mirrored from the host.
@@ -51,7 +60,11 @@ var hp := 100
 var max_hp := 100
 var is_ko := false
 var invuln := 0.0
-var carrying := false
+var carrying := false:
+	set(v):
+		if v != carrying:
+			carrying = v
+			_update_mask()
 ## Held by another player's gag (swallowed by Zoomba, grabbed by the Claw).
 var captured_by := 0
 var capture_mode: Capture = Capture.NONE
@@ -61,6 +74,18 @@ var dance_t := 0.0
 var gag_t := 0.0
 ## Host only: when this character was last seen hidden (validates ambushes).
 var last_stealth_time := -100.0
+## Picked up off the floor (see Pickups), mirrored on every machine: someone
+## else's weapon (their character id) and for how long, bubble wrap (damage it
+## will still soak up; the host decides), and a cleanup turbo tool's chore.
+var borrowed := ""
+var borrow_t := 0.0
+var shield := 0
+var shield_t := 0.0
+var turbo_chore := Chores.Chore.NONE
+var turbo_t := 0.0
+## Host only: the cleanup job a bot has picked (it works that one when in reach,
+## rather than whatever's nearest).
+var focus_job = null  # (untyped: floor mess may be freed under it)
 
 # --- Simulated by the owner, streamed to everyone else.
 var facing := Vector2.RIGHT
@@ -78,6 +103,7 @@ var knock_vel := Vector2.ZERO
 var stun := 0.0
 var attack_cd := 0.0
 var special_cd := 0.0
+var melee_cd := 0.0
 var dash_cd := 0.0
 var buff_mult := 1.0
 var vanish_t := 0.0
@@ -114,6 +140,18 @@ var _stun_vis := 0.0
 var _flip_t := 0.0
 var _revealed := false
 var _showing_bone := false
+var _shown_weapon := ""
+var _hop_t := 0.0
+var _seen := true
+var _hop_h := 0.0
+## A pounce in the air: the melee move to swing when it lands.
+var _pounce: Dictionary = {}
+var _pounce_ambush := false
+## Cleanup, on this screen: where the arrow on the ring points (see Match.pointer_for),
+## and whether this character's own jobs are all done.
+var _pointer: Dictionary = {}
+var _pointer_t := 0.0
+var _all_done := false
 
 
 func setup(p_id: int, info: Dictionary, p_arena: Match) -> void:
@@ -127,14 +165,13 @@ func setup(p_id: int, info: Dictionary, p_arena: Match) -> void:
 	max_hp = data["hp"]
 	hp = max_hp
 	arena = p_arena
-	set_multiplayer_authority(1 if is_bot else p_id)
+	# Guests on a shared screen are owned by that screen's machine, like bots are by the host.
+	set_multiplayer_authority(1 if is_bot else int(info.get("owner", p_id)))
 
 
 func _ready() -> void:
 	collision_layer = 4
-	# Flyers pass over furniture; Zoomba drives under it.
-	var over_furniture: bool = data.get("flying", false) or data.get("low_profile", false)
-	collision_mask = 1 if over_furniture else 3
+	_update_mask()
 	motion_mode = CharacterBody2D.MOTION_MODE_FLOATING
 	z = hover()
 	_net_pos = position
@@ -146,27 +183,53 @@ func _ready() -> void:
 	var s := _sprite.texture.get_size()
 	_sprite.offset = Vector2(-floor(s.x / 2.0), -s.y + 1)
 	_visual.add_child(_sprite)
-	var w: Dictionary = data["weapon"]
-	if w.has("sprite"):
-		_weapon = Sprite2D.new()
-		_weapon.texture = Roster.texture(w["sprite"])
-		if int(w["kind"]) == Roster.Weapon.MELEE:
-			# Hangs from its top (the wrecking ball's chain).
-			_weapon.centered = false
-			_weapon.offset = Vector2(-floor(_weapon.texture.get_width() / 2.0), 0)
-		_visual.add_child(_weapon)
+	# The weapon in hand (see _update_weapon): its own, the Big Bone, or one picked up.
+	_weapon = Sprite2D.new()
+	_visual.add_child(_weapon)
 	_overlay = Node2D.new()
 	_overlay.z_index = 30
 	_overlay.draw.connect(_draw_overlay)
 	add_child(_overlay)
 
 
+## Can the people looking at this screen see us right now? (Stealthed enemies
+## can't be; teammates and see-through hidden characters on a shared sofa can.)
+func seen_here() -> bool:
+	return _seen
+
+
+## What this character bumps into: the room's shell (1), furniture (2) and
+## walls (8). Flyers pass over furniture and the cutaway walls, but the remote
+## weighs them down: carrying it, they fly low and have to use the doors.
+## Zoomba drives under furniture, never through walls.
+func _update_mask() -> void:
+	if data.get("flying", false):
+		collision_mask = 1 | WallPanel.LAYER if carrying else 1
+	elif data.get("low_profile", false):
+		collision_mask = 1 | WallPanel.LAYER
+	else:
+		collision_mask = 1 | 2 | WallPanel.LAYER
+
+
 func hover() -> float:
-	return float(data.get("hover", 0.0))
+	var h := float(data.get("hover", 0.0))
+	if carrying and data.get("flying", false):
+		return minf(h, CARRY_HOVER)
+	return h
 
 
+## Played by someone looking at this screen (you, or a guest sharing it).
 func is_local() -> bool:
-	return is_multiplayer_authority() and not is_bot
+	return seat >= 0
+
+
+## Arrow, tag and card colour: the seat's colour when several people share the
+## screen (so everyone can find themselves), otherwise the team colour. (The
+## ring under each character always shows its team.)
+func marker_color() -> Color:
+	if seat >= 0 and arena.shared_screen():
+		return Seats.color(seat)
+	return Roster.TEAM_COLORS[team]
 
 
 func sprite_height() -> float:
@@ -211,6 +274,7 @@ func _gather_input() -> Dictionary:
 
 func _owner_tick(delta: float) -> void:
 	attack_cd = maxf(0.0, attack_cd - delta)
+	melee_cd = maxf(0.0, melee_cd - delta)
 	special_cd = maxf(0.0, special_cd - delta)
 	dash_cd = maxf(0.0, dash_cd - delta)
 	stun = maxf(0.0, stun - delta)
@@ -221,13 +285,18 @@ func _owner_tick(delta: float) -> void:
 		buff_mult = 1.0
 
 	if captured_by != 0:
+		_pounce = {}
 		_follow_captor()
 		return
 	if arena.phase == Match.Phase.WAR and not is_ko:
 		var was_ready := gag_charge >= 1.0
 		gag_charge = minf(1.0, gag_charge + delta / GAG_CHARGE_TIME)
 		if gag_charge >= 1.0 and not was_ready and is_local():
-			Audio.play("gag_ready")
+			if arena.shared_screen():
+				sound("gag_ready")
+				Fx.text(arena.level.entities, position + Vector2(0, -sprite_height() - z - 10), "GAG READY!", marker_color())
+			else:
+				Audio.play("gag_ready")
 
 	var inp := _gather_input()
 	var free_to_act := arena.can_move() and not is_ko and stun <= 0.0
@@ -248,6 +317,8 @@ func _owner_tick(delta: float) -> void:
 	if _dash_t > 0.0:
 		_dash_t -= delta
 		v = facing * DASH_SPEED
+	if data.get("flying", false) and not is_ko and _slam_t <= 0.0 and not is_equal_approx(z, hover()):
+		z = move_toward(z, hover(), 60.0 * delta)  # sinking under the remote's weight, or rising again
 	if _slam_t > 0.0:
 		_slam_t -= delta
 		var sp: Dictionary = data["special"]
@@ -271,6 +342,8 @@ func _owner_tick(delta: float) -> void:
 	tumbling = knock_vel.length() > TUMBLE_SPEED
 	interacting = bool(inp["interact"]) and not is_ko and arena.can_move()
 	_update_stealth(delta)
+	if not _pounce.is_empty():
+		_resolve_pounce()
 
 	if not free_to_act:
 		return
@@ -283,8 +356,10 @@ func _owner_tick(delta: float) -> void:
 		_play_action.rpc(Action.DASH, facing)
 	if not at_war or carrying or _slam_t > 0.0:
 		return
-	var auto_fire: bool = inp.get("attack_held", false) and float(data["weapon"]["cooldown"]) < 0.2
-	if (inp["attack"] or auto_fire) and attack_cd <= 0.0:
+	var auto_fire: bool = inp.get("attack_held", false) and float(weapon_spec()["cooldown"]) < 0.2
+	if inp["interact_pressed"] and melee_cd <= 0.0:
+		_do_melee()
+	elif (inp["attack"] or auto_fire) and attack_cd <= 0.0:
 		_do_attack()
 	elif inp["special"] and special_cd <= 0.0:
 		_do_special()
@@ -311,7 +386,8 @@ func _net_state(p: Vector2, f: Vector2, pz: float, flags: int) -> void:
 	hiding = flags & 32 != 0
 
 
-## Knocked into furniture hard enough? That furniture takes a beating.
+## Knocked into furniture hard enough? That furniture takes a beating (and
+## the floor gets a scuff mark; a wall just loses its pictures).
 func _check_crashes(delta: float) -> void:
 	for key in _crash_cd.keys():
 		_crash_cd[key] -= delta
@@ -323,7 +399,7 @@ func _check_crashes(delta: float) -> void:
 		var f := get_slide_collision(k).get_collider() as Furniture
 		if f and not _crash_cd.has(f):
 			_crash_cd[f] = 0.4
-			arena.report_furniture_hit(f, CRASH_DAMAGE)
+			arena.report_furniture_hit(f, CRASH_DAMAGE, self, -1)
 
 
 # ==================================================================== stealth
@@ -358,12 +434,48 @@ func has_bone() -> bool:
 	return gag_t > 0.0 and int(data["gag"]["kind"]) == Roster.Gag.BONE
 
 
+## Holding a weapon picked up off the floor (someone else's)?
+func has_borrowed() -> bool:
+	return borrowed != "" and borrow_t > 0.0
+
+
 func weapon_spec() -> Dictionary:
-	return data["gag"] if has_bone() else data["weapon"]
+	if has_bone():
+		return data["gag"]
+	if has_borrowed():
+		return Roster.get_char(borrowed)["weapon"]
+	return data["weapon"]
+
+
+## Which ability (see ability_spec) the attack button uses right now.
+func weapon_ability() -> int:
+	if has_bone():
+		return 2
+	return 4 if has_borrowed() else 0
+
+
+## The weapon (0), special (1), gag (2), close-up move (3) or picked-up
+## weapon (4) of this character. A picked-up weapon stays known after it runs
+## out, so its last shots still land on every machine.
+func ability_spec(which: int) -> Dictionary:
+	if which == 4:
+		return Roster.get_char(borrowed)["weapon"] if borrowed != "" else data["weapon"]
+	return Roster.ability(data, which)
 
 
 func _weapon_is_melee() -> bool:
-	return has_bone() or int(data["weapon"]["kind"]) == Roster.Weapon.MELEE
+	return has_bone() or int(weapon_spec()["kind"]) == Roster.Weapon.MELEE
+
+
+## What the card says about something picked up, or "".
+func pickup_status() -> String:
+	if has_borrowed():
+		return "%s!  %ds" % [weapon_spec()["name"], ceili(borrow_t)]
+	if shield > 0:
+		return "Bubble wrap (%d)" % shield
+	if turbo_t > 0.0:
+		return "TURBO!  %ds" % ceili(turbo_t)
+	return ""
 
 
 func _do_attack() -> void:
@@ -373,9 +485,50 @@ func _do_attack() -> void:
 	_break_stealth(0.6)
 	_play_action.rpc(Action.ATTACK, facing)
 	if _weapon_is_melee():
-		_hit_arc(w, 2 if has_bone() else 0, ambush)
+		_hit_arc(w, weapon_ability(), ambush)
 	else:
-		_fire(0, w, ambush)
+		_fire(weapon_ability(), w, ambush)
+
+
+## The right button (when you aren't carrying the remote): this character's
+## own close-up move (see "melee" in Roster).
+func _do_melee() -> void:
+	var m: Dictionary = data["melee"]
+	melee_cd = float(m["cooldown"])
+	# Swinging up close ties up your hands for a moment: no firing mid-swipe.
+	attack_cd = maxf(attack_cd, MELEE_WEAPON_LOCK)
+	var ambush := stealthed
+	_break_stealth(0.6)
+	_play_action.rpc(Action.MELEE, facing)
+	if m.get("effect", "") == "lunge":
+		# Hop forward first (a very short dash) and swipe where you land, or
+		# as soon as someone is right in front of you.
+		_dash_t = float(m["effect_value"]) / DASH_SPEED
+		_pounce = m
+		_pounce_ambush = ambush
+		return
+	_hit_arc(m, 3, ambush)
+
+
+func _resolve_pounce() -> void:
+	if stun > 0.0 or is_ko or arena.phase != Match.Phase.WAR:
+		_pounce = {}
+		return
+	if _dash_t > 0.0 and not _enemy_ahead(float(_pounce["range"]) * 0.5, float(_pounce["arc"]) * 0.5):
+		return
+	_dash_t = 0.0
+	_hit_arc(_pounce, 3, _pounce_ambush)
+	_pounce = {}
+
+
+func _enemy_ahead(reach: float, half_arc: float) -> bool:
+	for other: Player in arena.players.values():
+		if other.team == team or other.is_ko:
+			continue
+		var off := Iso.to_floor(other.position - position)
+		if off.length() <= reach + BODY_RADIUS and (off.length() < 4.0 or absf(rad_to_deg(facing.angle_to(off))) <= half_arc):
+			return true
+	return false
 
 
 func _do_gag() -> void:
@@ -403,16 +556,21 @@ func _do_gag() -> void:
 ## Flock Call: everyone in a wide lane ahead gets bowled over at once.
 func _flock_hits(g: Dictionary) -> void:
 	var side := Vector2(-facing.y, facing.x)
+	# The stampede stops at the first wall.
+	var lane := float(g["length"])
+	var wall := arena.level.wall_between(position, position + Iso.to_screen(facing * lane))
+	if not wall.is_empty():
+		lane = Iso.fdist(position, wall["point"])
 	for other: Player in arena.players.values():
 		if other.team == team or other.is_ko:
 			continue
 		var off := Iso.to_floor(other.position - position)
 		var along := off.dot(facing)
-		if along > 0.0 and along <= float(g["length"]) and absf(off.dot(side)) <= float(g["width"]):
+		if along > 0.0 and along <= lane and absf(off.dot(side)) <= float(g["width"]):
 			arena.report_hit(self, other, 2, facing)
 	for item in arena.level.mess_items:
 		var off := Iso.to_floor(item.position - position)
-		if off.dot(facing) > 0.0 and off.dot(facing) <= float(g["length"]) and absf(off.dot(side)) <= float(g["width"]):
+		if off.dot(facing) > 0.0 and off.dot(facing) <= lane and absf(off.dot(side)) <= float(g["width"]):
 			arena.report_mess_hit(item, g["knock"], facing)
 
 
@@ -491,7 +649,9 @@ func _land_slam() -> void:
 ## Reports every enemy, breakable and piece of furniture in a cone in front of us.
 func _hit_arc(w: Dictionary, ability: int, ambush: bool) -> void:
 	var reach: float = w["range"]
-	var half_arc: float = float(w["arc"]) * 0.5
+	# A full circle (Zoomba's spin) must include straight behind, despite rounding.
+	var half_arc: float = float(w["arc"]) * 0.5 + 0.01
+	var hit_someone := false
 	for other: Player in arena.players.values():
 		if other.team == team or other.is_ko:
 			continue
@@ -501,15 +661,30 @@ func _hit_arc(w: Dictionary, ability: int, ambush: bool) -> void:
 			continue
 		if d > 4.0 and absf(rad_to_deg(facing.angle_to(off))) > half_arc:
 			continue
+		if _walled(position, other.position):
+			continue
+		hit_someone = true
 		arena.report_hit(self, other, ability, off.normalized() if d > 0.1 else facing, ambush)
+	# Some close-up moves are made for knocking things over.
+	var item_force := float(w["knock"])
+	if w.get("effect", "") == "shove_items":
+		item_force = maxf(item_force, float(w.get("effect_value", 0.0)))
 	for item in arena.level.mess_items:
 		var off := Iso.to_floor(item.position - position)
-		if off.length() <= reach + 6.0 and (off.length() < 4.0 or absf(rad_to_deg(facing.angle_to(off))) <= half_arc):
-			arena.report_mess_hit(item, w["knock"], off)
+		if off.length() <= reach + 6.0 and (off.length() < 4.0 or absf(rad_to_deg(facing.angle_to(off))) <= half_arc) \
+				and not _walled(position, item.position):
+			arena.report_mess_hit(item, item_force, off)
 	for f in arena.level.furniture:
+		if f is WallPanel:
+			continue
 		var off := Iso.to_floor(f.position - position)
-		if f.can_be_damaged() and off.length() <= reach + f.reach() and absf(rad_to_deg(facing.angle_to(off))) <= half_arc:
-			arena.report_furniture_hit(f, w.get("demolition", 0.0))
+		if f.can_be_damaged() and off.length() <= reach + f.reach() and absf(rad_to_deg(facing.angle_to(off))) <= half_arc \
+				and not _walled(position, f.position):
+			arena.report_furniture_hit(f, w.get("demolition", 0.0), self, ability)
+	# A swing that lands on someone doesn't also dent the wall behind them:
+	# walls break when you swing at the wall.
+	if not hit_someone:
+		_hit_nearest_wall(position, reach, half_arc, float(w.get("demolition", 0.0)), ability)
 
 
 ## Reports every enemy, breakable and piece of furniture within a radius of a point.
@@ -518,17 +693,50 @@ func hit_area(center: Vector2, radius: float, ability: int, force: float, demoli
 		if other.team == team or other.is_ko:
 			continue
 		var off := Iso.to_floor(other.position - center)
-		if off.length() <= radius + BODY_RADIUS:
+		if off.length() <= radius + BODY_RADIUS and not _walled(center, other.position):
 			arena.report_hit(self, other, ability, off.normalized() if off.length() > 0.1 else facing, ambush)
 	if force > 0.0:
 		for item in arena.level.mess_items:
 			var off := Iso.to_floor(item.position - center)
-			if off.length() <= radius + 6.0:
+			if off.length() <= radius + 6.0 and not _walled(center, item.position):
 				arena.report_mess_hit(item, force, off)
 	if demolition > 0.0:
 		for f in arena.level.furniture:
-			if f.can_be_damaged() and Iso.fdist(center, f.position) <= radius + f.reach():
-				arena.report_furniture_hit(f, demolition)
+			if f is WallPanel:
+				continue
+			if f.can_be_damaged() and Iso.fdist(center, f.position) <= radius + f.reach() and not _walled(center, f.position):
+				arena.report_furniture_hit(f, demolition, self, ability)
+		_hit_nearest_wall(center, radius, 180.0, demolition, ability)
+
+
+## Is there a standing wall between a and b?
+func _walled(a: Vector2, b: Vector2) -> bool:
+	return not arena.level.wall_between(a, b).is_empty()
+
+
+## Only the one nearest wall panel (in the swing's cone) takes a hit or a blast,
+## so a hole is exactly as big as the panels really broken. Weak hits don't
+## bother the host: they'd do nothing to a wall.
+func _hit_nearest_wall(center: Vector2, radius: float, half_arc: float, demolition: float, ability: int) -> void:
+	if demolition <= 0.0:
+		return
+	var best: WallPanel = null
+	var best_d := INF
+	for panel in arena.level.wall_panels:
+		if panel.wrecked:
+			continue
+		var l := panel.line()
+		var near := Iso.closest_on_segment(center, l[0], l[1])
+		var d := maxf(0.0, Iso.fdist(center, near) - WallPanel.HALF_THICK)
+		if d > radius or d >= best_d:
+			continue
+		var off := Iso.to_floor(near - center)
+		if half_arc < 180.0 and off.length() > 4.0 and absf(rad_to_deg(facing.angle_to(off))) > half_arc:
+			continue
+		best = panel
+		best_d = d
+	if best and best.can_be_damaged() and demolition >= best.min_hit:
+		arena.report_furniture_hit(best, demolition, self, ability)
 
 
 @rpc("authority", "call_local", "reliable")
@@ -561,6 +769,8 @@ func _play_action(action: int, dir: Vector2) -> void:
 			else:
 				_recoil = 1.0
 				_squash = 0.1
+		Action.MELEE:
+			_play_melee(dir)
 		Action.DASH:
 			_squash = 0.3
 			if not stealthed:
@@ -601,9 +811,54 @@ func _play_action(action: int, dir: Vector2) -> void:
 			Fx.text(fx_parent, position + Vector2(0, -sprite_height() - z - 6), String(sp["name"]).to_upper() + "!", Roster.TEAM_COLORS[team].lightened(0.3))
 
 
+## How each kind of close-up move looks (everyone sees it; the owner already did the hit).
+func _play_melee(dir: Vector2) -> void:
+	var m: Dictionary = data["melee"]
+	var fx_parent := arena.level.entities
+	var look := String(m.get("look", "swipe"))
+	var at := position + Vector2(0, -z - 6)
+	var ahead := at + Iso.to_screen(dir * float(m["range"]) * 0.7)
+	var col := Roster.TEAM_COLORS[team].lightened(0.4)
+	sound(m.get("sfx", "m_" + look))
+	_squash = 0.25
+	match look:
+		"swipe":  # Willow: the swipe itself lands with the pounce, so show the leap.
+			_squash = 0.45
+			Fx.slash(fx_parent, at + Iso.to_screen(dir * (float(m["range"]) + float(m.get("effect_value", 0.0)))), dir, Color.WHITE)
+		"knead":
+			Fx.burst(fx_parent, ahead, Color("ffc2d1"))
+			Fx.text(fx_parent, ahead + Vector2(0, -10), "purr", Color("ffc2d1"))
+		"chomp":
+			Fx.slash(fx_parent, ahead, dir, Color.WHITE)
+			Fx.text(fx_parent, ahead + Vector2(0, -8), "CHOMP!", Color.WHITE)
+		"peck":
+			Fx.burst(fx_parent, ahead, Color("ffd84d"))
+		"spin":
+			Fx.ring(fx_parent, position, float(m["range"]) + 4.0, Color(1, 1, 1, 0.8), false)
+			Fx.ring(fx_parent, position, float(m["range"]) * 0.6, col, false)
+		"flip":
+			_swing = 1.0
+			Fx.swing(fx_parent, at + Vector2(0, 6), dir, float(m["range"]) * 0.9, Color(1, 1, 1, 0.85))
+			Fx.text(fx_parent, ahead + Vector2(0, -8), "FLIP!", Color("ffd84d"))
+		"yoink":
+			Fx.slash(fx_parent, ahead, -dir, Color("ffd84d"))
+			Fx.text(fx_parent, ahead + Vector2(0, -8), "YOINK!", Color("ffd84d"))
+		"feedback":
+			Fx.ring(fx_parent, position + Iso.to_screen(dir * 6.0), float(m["range"]) + 6.0, Color("62f2ff"), false)
+			Fx.text(fx_parent, ahead + Vector2(0, -8), "SKREEE!", Color("62f2ff"))
+			for k in 3:
+				Fx.note(fx_parent, position + Iso.to_screen(dir.rotated(-0.6 + 0.6 * k) * 16.0))
+		_:
+			Fx.slash(fx_parent, ahead, dir, Color.WHITE)
+
+
 # ================================================= events from the host
 
-func on_damaged(new_hp: int, knock: Vector2, stun_time: float, ambushed: bool) -> void:
+## `hop`: how high a "knockup" close-up move pops you into the air (px).
+func on_damaged(new_hp: int, knock: Vector2, stun_time: float, ambushed: bool, hop: float = 0.0) -> void:
+	if hop > 0.0:
+		_hop_t = HOP_TIME
+		_hop_h = hop
 	sound("hit_big" if hp - new_hp >= 20 else "hit")
 	hp = new_hp
 	_flash = 0.15
@@ -690,10 +945,18 @@ func apply_pull(pull: Vector2) -> void:
 		knock_vel = knock_vel * 0.5 + pull
 
 
-func apply_buff(mult: float, duration: float, heal_to: int) -> void:
+## Healed by the host (a close-up move that drains health).
+func heal(new_hp: int) -> void:
+	if new_hp > hp:
+		Fx.text(arena.level.entities, position + Vector2(0, -sprite_height() - z - 4), "+%d" % (new_hp - hp), Color("8ff0a4"))
+	hp = new_hp
+
+
+func apply_buff(mult: float, duration: float, heal_to: int, label: String = "+HYPE") -> void:
 	hp = heal_to
-	Fx.text(arena.level.entities, position + Vector2(0, -sprite_height() - z - 4), "+HYPE", Color("62f2ff"))
-	if is_multiplayer_authority():
+	Fx.text(arena.level.entities, position + Vector2(0, -sprite_height() - z - 4), label, Color("62f2ff"))
+	# A weaker (or shorter) buff never cuts a stronger one short.
+	if is_multiplayer_authority() and (_buff_t <= 0.0 or mult > buff_mult or (mult == buff_mult and duration > _buff_t)):
 		buff_mult = mult
 		_buff_t = duration
 
@@ -708,7 +971,14 @@ func reset_for_phase() -> void:
 	capture_mode = Capture.NONE
 	dance_t = 0.0
 	gag_t = 0.0
+	borrowed = ""
+	borrow_t = 0.0
+	shield = 0
+	shield_t = 0.0
+	turbo_t = 0.0
 	if is_multiplayer_authority():
+		buff_mult = 1.0
+		_buff_t = 0.0
 		knock_vel = Vector2.ZERO
 		stun = 0.0
 		vanish_t = 0.0
@@ -736,6 +1006,11 @@ func _process(delta: float) -> void:
 	_swing = move_toward(_swing, 0.0, delta * 4.0)
 	gag_t = maxf(0.0, gag_t - delta)
 	dance_t = maxf(0.0, dance_t - delta)
+	borrow_t = maxf(-3.0, borrow_t - delta)
+	turbo_t = maxf(0.0, turbo_t - delta)
+	shield_t = maxf(0.0, shield_t - delta)
+	if shield_t <= 0.0:
+		shield = 0
 	if absf(facing.x) > 0.2:
 		_face_left = facing.x < 0.0
 	_sprite.flip_h = _face_left
@@ -770,6 +1045,9 @@ func _process(delta: float) -> void:
 			tint.a = 0.35
 		_sprite.modulate = tint
 	_sprite.scale = Vector2(sx, sy)
+	if _hop_t > 0.0:
+		_hop_t = maxf(0.0, _hop_t - delta)
+		bob -= sin(_hop_t / HOP_TIME * PI) * _hop_h
 	_visual.position = Vector2(0, round(-z + bob))
 	_update_weapon()
 
@@ -779,42 +1057,77 @@ func _process(delta: float) -> void:
 	if capture_mode == Capture.SWALLOWED:
 		target_alpha = 0.0  # Inside the dust bin.
 	elif stealthed and not is_ko:
-		var viewer := arena.local_player()
-		var viewer_team := viewer.team if viewer else team
-		if viewer_team == team:
+		var teams := arena.screen_teams()
+		if teams.size() > 1:
+			# Both teams share this screen, so nothing can be hidden from half the
+			# sofa: everyone sees hidden characters the way teammates do (bots and
+			# players on other machines still can't see them at all).
 			target_alpha = 0.4
-		elif arena.is_revealed(self, viewer_team):
+			if arena.is_revealed(self, 1 - team):
+				target_alpha = 0.85
+				_revealed = true
+		elif teams[0] == team:
+			target_alpha = 0.4
+		elif arena.is_revealed(self, teams[0]):
 			target_alpha = 0.85
 			_revealed = true
 		else:
 			target_alpha = 0.08 if moving and not hiding else 0.0
 	modulate.a = move_toward(modulate.a, target_alpha, delta * 5.0)
+	_seen = target_alpha >= 0.3
 
 	if dashing and not is_ko and not stealthed:
 		_ghost_t -= delta
 		if _ghost_t <= 0.0:
 			_ghost_t = 0.03
 			Fx.ghost(arena.level.entities, _sprite, global_position)
+	_update_pointer(delta)
 	queue_redraw()
 	_overlay.queue_redraw()
+
+
+## Cleanup: finds this local player's nearest job a few times a second, and
+## cheers once when their own list is done.
+func _update_pointer(delta: float) -> void:
+	if arena.phase != Match.Phase.CLEANUP or not is_local():
+		_pointer = {}
+		return
+	_pointer_t -= delta
+	if _pointer_t > 0.0:
+		return
+	_pointer_t = 0.25
+	_pointer = arena.pointer_for(self)
+	# Done once nothing of this chore is left, not even steps still to come.
+	var mine := arena.my_chore(self)
+	var done: bool = mine != Chores.Chore.NONE and int(arena.chore_totals().get(mine, [0, 0.0])[0]) == 0
+	if done and not _all_done:
+		Fx.text(arena.level.entities, position + Vector2(0, -sprite_height() - 12), "ALL DONE! HELP!", marker_color())
+		Audio.play_at("c_done", arena.level.entities, position)
+	_all_done = done
 
 
 func _update_weapon() -> void:
 	if _weapon == null:
 		return
 	var w := weapon_spec()
-	if has_bone() != _showing_bone:
+	var shown := String(w.get("sprite", ""))
+	if shown != _shown_weapon or has_bone() != _showing_bone:
+		_shown_weapon = shown
 		_showing_bone = has_bone()
-		var tex := Roster.texture(w["sprite"])
+		var tex := Roster.texture(shown) if shown != "" else null
 		_weapon.texture = tex
-		_weapon.centered = not _weapon_is_melee()
-		if _showing_bone:
-			_weapon.offset = Vector2(-floor(tex.get_width() / 2.0), -tex.get_height() + 2)
-		elif _weapon_is_melee():
-			_weapon.offset = Vector2(-floor(tex.get_width() / 2.0), 0)
-		else:
-			_weapon.offset = Vector2.ZERO
-	_weapon.visible = not is_ko and _flip_t <= 0.0 and captured_by == 0
+		if tex:
+			_weapon.centered = not _weapon_is_melee()
+			if _showing_bone:
+				_weapon.offset = Vector2(-floor(tex.get_width() / 2.0), -tex.get_height() + 2)
+			elif _weapon_is_melee():
+				# Hangs from its top (the wrecking ball's chain).
+				_weapon.offset = Vector2(-floor(tex.get_width() / 2.0), 0)
+			else:
+				_weapon.offset = Vector2.ZERO
+	_weapon.visible = _weapon.texture != null and not is_ko and _flip_t <= 0.0 and captured_by == 0
+	if not _weapon.visible:
+		return
 	var hold: Vector2 = w["hold"]
 	var side := -1.0 if _face_left else 1.0
 	_weapon.flip_h = _face_left
@@ -835,12 +1148,13 @@ func _draw() -> void:
 	# Shadow, shrinking as we go up.
 	var shadow_r := 7.0 - clampf(z / 12.0, 0.0, 3.0)
 	draw_colored_polygon(Iso.ellipse(shadow_r, 16), Color(0, 0, 0, 0.25))
-	# Team ring (brighter for your own character; red dashes when revealed).
+	# Team ring (brighter, in the seat's colour, for people on this screen; red when revealed).
 	var ring := Iso.ellipse(9.0 if is_local() else 8.0, 20)
 	ring.append(ring[0])
 	var col: Color = Color("ff5a6e") if _revealed else Roster.TEAM_COLORS[team]
 	col.a = 0.95 if is_local() or _revealed else 0.55
-	draw_polyline(ring, col, 1.0)
+	draw_polyline(ring, col, 2.0 if is_local() and arena.shared_screen() else 1.0)
+	_draw_pointer()
 	# The Claw hangs from a cable on a trolley that rides the ceiling rails.
 	if char_id == "claw" and not is_ko:
 		var top := Vector2(0, round(-z) - sprite_height() + 2)
@@ -860,17 +1174,63 @@ func _draw() -> void:
 		draw_polyline(edge, Color(1, 0.35, 0.35, 0.8), 1.0)
 
 
+## Cleanup: an arrow on the ring toward this player's nearest job, and a tick
+## once their own jobs are all done.
+func _draw_pointer() -> void:
+	if _pointer.is_empty() and not _all_done:
+		return
+	var col := marker_color() if arena.shared_screen() else Color.WHITE
+	if _all_done:
+		var t := Iso.to_screen(Vector2(11, 0)) + Vector2(1, -2)
+		draw_polyline(PackedVector2Array([t, t + Vector2(2, 2), t + Vector2(6, -3)]), Color("8ff0a4"), 1.5)
+	if _pointer.is_empty():
+		return
+	var dir := Iso.to_floor(_pointer["at"] - position)
+	if dir.length() < 14.0:
+		return  # you're there
+	dir = dir.normalized()
+	var tip := Iso.to_screen(dir * 15.0)
+	var base := Iso.to_screen(dir * 11.0)
+	var side := Iso.to_screen(dir.orthogonal() * 3.0)
+	var poly := PackedVector2Array([tip, base + side, base - side])
+	draw_colored_polygon(poly, Color("2b1d2a"))
+	draw_colored_polygon(PackedVector2Array([tip - (tip - base) * 0.25, base + side * 0.6, base - side * 0.6]),
+		col if _pointer["own"] else Color(0.8, 0.8, 0.8))
+
+
+## The bobbing arrow over your own character; with several people on one
+## screen, in the seat's colour with "P2" etc. next to it.
+func _draw_you_marker(tip: Vector2) -> void:
+	var shared := arena.shared_screen()
+	var col := marker_color() if shared else Color.WHITE
+	_overlay.draw_colored_polygon(PackedVector2Array([tip + Vector2(-3, -3), tip + Vector2(3, -3), tip]), col)
+	if shared:
+		var label := Seats.tag(seat)
+		var font := ThemeDB.fallback_font
+		var at := tip + Vector2(-font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 7).x / 2.0, -5)
+		_overlay.draw_string_outline(font, at, label, HORIZONTAL_ALIGNMENT_LEFT, -1, 7, 3, Color("2b1d2a"))
+		_overlay.draw_string(font, at, label, HORIZONTAL_ALIGNMENT_LEFT, -1, 7, col)
+
+
 func _draw_overlay() -> void:
 	if is_ko:
 		var zz := Vector2(4, -14 - sin(_anim_t * 3.0) * 2.0)
 		_overlay.draw_string(ThemeDB.fallback_font, zz, "z", HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color.WHITE)
 		_overlay.draw_string(ThemeDB.fallback_font, zz + Vector2(4, -5), "z", HORIZONTAL_ALIGNMENT_LEFT, -1, 6, Color.WHITE)
 		return
+	# Bubble wrap round them; a turbo tool's sparkle circling them.
+	var mid := Vector2(0, round(-z) - sprite_height() * 0.5)
+	if shield > 0:
+		var r := maxf(9.0, sprite_height() * 0.6)
+		_overlay.draw_circle(mid, r, Color(0.62, 0.85, 1.0, 0.18))
+		_overlay.draw_arc(mid, r, 0.0, TAU, 20, Color(0.8, 0.93, 1.0, 0.75), 1.0)
+	if turbo_t > 0.0:
+		for k in 2:
+			_overlay.draw_circle(mid + Vector2.from_angle(_anim_t * 6.0 + PI * k) * 9.0, 1.2, Color("ffd84d"))
 	var head := Vector2(0, round(-z) - sprite_height() - 3)
 	if arena.phase != Match.Phase.WAR and arena.phase != Match.Phase.COUNTDOWN:
 		if is_local():
-			var tip0 := head + Vector2(0, sin(_anim_t * 5.0))
-			_overlay.draw_colored_polygon(PackedVector2Array([tip0 + Vector2(-3, -3), tip0 + Vector2(3, -3), tip0]), Color.WHITE)
+			_draw_you_marker(head + Vector2(0, sin(_anim_t * 5.0)))
 		return
 	# Health pip bar.
 	var w := 14.0
@@ -880,8 +1240,7 @@ func _draw_overlay() -> void:
 	var hp_col := Color("8ff0a4") if frac > 0.5 else (Color("ffd84d") if frac > 0.25 else Color("ff5a6e"))
 	_overlay.draw_rect(Rect2(bar.position, Vector2(round(w * frac), 2)), hp_col)
 	if is_local():
-		var tip := head + Vector2(0, -4 + sin(_anim_t * 5.0))
-		_overlay.draw_colored_polygon(PackedVector2Array([tip + Vector2(-3, -3), tip + Vector2(3, -3), tip]), Color.WHITE)
+		_draw_you_marker(head + Vector2(0, -4 + sin(_anim_t * 5.0)))
 	if _revealed:
 		# A little eye: someone's nose or x-ray vision has spotted you.
 		var eye := head + Vector2(0, -7)

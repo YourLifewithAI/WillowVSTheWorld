@@ -1,37 +1,45 @@
 class_name Maps
 extends RefCounted
 ## Every home you can fight in. Each map is a scene under res://scenes/maps/
-## built from the same pieces (Room, Furniture, MessItem, BaseZone, FloorZone).
+## built from the same pieces (Room, Furniture, MessItem, BaseZone, FloorZone,
+## and WallRun for homes with several rooms).
 ## Optional keys override the match defaults for that map.
 
 const LIST := {
+	"family_home": {
+		"name": "The Family Home", "home": "Family home",
+		"blurb": "Kitchen, dining room, den and a big living room in a ring. Bases behind doors; the big hitters can knock through walls.",
+		"players": "4-8", "scene": "res://scenes/maps/family_home.tscn",
+		"war_time": 180.0, "cleanup_time": 58.0,
+	},
 	"living_room": {
-		"name": "The Living Room", "home": "Family home",
-		"blurb": "The classic. One big cozy room, a rug in the middle, bases in the corners.",
+		"name": "The Living Room (classic)", "home": "Open-plan living room",
+		"blurb": "The classic: one big open room, no walls. A good place to learn.",
 		"players": "4-6", "scene": "res://scenes/maps/living_room.tscn",
+		"cleanup_time": 50.0,
 	},
 	"studio": {
 		"name": "Studio Apartment", "home": "City studio",
 		"blurb": "Bed, desk and kitchenette in one tiny room. Short runs, constant chaos.",
 		"players": "2-4", "scene": "res://scenes/maps/studio.tscn",
-		"war_time": 150.0, "cleanup_time": 35.0,
+		"war_time": 150.0, "cleanup_time": 45.0,
 	},
 	"farmhouse": {
 		"name": "The Farmhouse", "home": "Country farmhouse",
-		"blurb": "Wood stove, farm table, muddy boots and a pie cooling somewhere it shouldn't be.",
+		"blurb": "Pantry, mudroom, workshop and a farm kitchen around an old stone chimney, with a porch all the way round.",
 		"players": "4-6", "scene": "res://scenes/maps/farmhouse.tscn",
-		"cleanup_time": 50.0,
+		"cleanup_time": 54.0,
 	},
 	"suburbs": {
 		"name": "Suburban House", "home": "Big house in the suburbs",
-		"blurb": "Kitchen, living room and den split by half-walls. Long runs; the pets hold the kitchen.",
+		"blurb": "A long ranch house: kitchen, dining room, living room, garage and den. Long runs, so passing matters.",
 		"players": "6-8", "scene": "res://scenes/maps/suburbs.tscn",
-		"war_time": 210.0, "cleanup_time": 55.0,
+		"war_time": 210.0, "cleanup_time": 63.0,
 	},
 }
 
-const ORDER: Array[String] = ["living_room", "studio", "farmhouse", "suburbs"]
-const DEFAULT := "living_room"
+const ORDER: Array[String] = ["family_home", "suburbs", "farmhouse", "studio", "living_room"]
+const DEFAULT := "family_home"
 
 
 static func get_map(id: String) -> Dictionary:

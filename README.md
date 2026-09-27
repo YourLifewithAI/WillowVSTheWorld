@@ -12,10 +12,18 @@ Grab the remote, carry it to your team's rug, and hold it there for two seconds 
 change the channel. Blast anyone who tries, and the furniture too. KOs are just naps.
 
 **Phase 2: Cover it up.** *CAR IN THE DRIVEWAY!* Truce. Everyone, both teams,
-rebuilds the wrecked furniture, stands lamps back up, scrubs the scorch marks and
-returns the remote. The war's
-winners only get to watch their show if the house passes inspection. Otherwise
-everybody is grounded.
+cleans up, and everyone does it differently: Zoomba vacuums, Willow bats books and
+toys under the couch, Bass thumps the stains away, Pepper fetches whatever got
+knocked over, Biscuit kneads the cushions, Unit-7 fixes, the Claw lifts and Kiwi
+puts things back up high. Anyone can help with anything, but at a fifth of the
+speed, so after a big war the house only gets spotless if everyone plays to their
+strengths. The war's winners only get to watch their show if the house passes
+inspection. Otherwise everybody is grounded.
+
+Things pop up on the floor all the while: in the war, power-ups (the zoomies,
+bubble wrap, snacks, treats that charge your gag) and other characters' weapons;
+in the cleanup, turbo tools that only the chore's owner can pick up, and roller
+skates.
 
 | Pick a side | Clean up together |
 |---|---|
@@ -25,13 +33,27 @@ everybody is grounded.
 
 Pick where the fight happens in the lobby. Each home plays differently.
 
-| Studio Apartment | The Farmhouse | Suburban House |
+| The Family Home | Suburban House | The Farmhouse |
 |---|---|---|
-| ![Studio apartment map](docs/images/map_studio.png) | ![Farmhouse map](docs/images/map_farmhouse.png) | ![Suburban house map](docs/images/map_suburbs.png) |
-| Tiny, cramped, constant brawling. 2-4 players. | Wood stove, farm table, a pie on the floor. 4-6 players. | Kitchen, living room and den behind knee-walls. 6-8 players. |
+| ![Family home map](docs/images/map_family_home.png) | ![Suburban house map](docs/images/map_suburbs.png) | ![Farmhouse map](docs/images/map_farmhouse.png) |
+| Kitchen, dining room, den and living room in a ring. The default. 4-8 players. | A long ranch house: kitchen, dining room, living room, garage and den. 6-8 players. | Four rooms round an old stone chimney, with a porch all the way round. 4-6 players. |
 
-...plus **The Living Room**, the original. The design doc has a list of homes
-to build next and a step-by-step guide to making your own.
+...plus the **Studio Apartment** (one tiny room, constant brawling, 2-4 players) and
+**The Living Room (classic)**, the original open room, a good place to learn.
+
+**Inside walls** are drawn like a dollhouse with the top cut off, so you can see
+over them, and they turn see-through when someone's behind them. Shots, blasts,
+swings and a thrown remote all stop at them (except Bass's bass waves, which go
+right through). Only the **big hitters** can knock through a plain painted wall:
+Biscuit's bazooka and belly flop, the Claw's wrecking ball and claw drop, Unit-7's
+rocket fist and satellite laser, and Pepper while he holds the Big Bone. Everything
+else just goes *tink*. Stone and outside walls never break. A hole is a new way
+through for everyone, and one more thing to fix before the parents get home.
+Birds and the Claw fly over the walls, but not while carrying the remote: it
+weighs them down, so they have to use the doors.
+
+The design doc has a list of homes to build next and a step-by-step guide to
+making your own.
 
 The full design (rules, roster, homes, art direction, networking, roadmap) is in
 **[docs/GAME_DESIGN.md](docs/GAME_DESIGN.md)**.
@@ -41,19 +63,19 @@ The full design (rules, roster, homes, art direction, networking, roadmap) is in
 Everyone gets a ridiculous weapon, one big strength and one real weakness. The
 pets are sneaky and chaotic, the robots have sensors and are great at repairs.
 
-| Team Pets | Weapon | + Strength | - Weakness |
-|---|---|---|---|
-| **Willow**, tabby cat | Laser Pointer Blaster | Invisible when still; *Vanish*; double-damage ambushes | Fragile |
-| **Biscuit**, chonky cat | Catnip Bazooka | Heavy (half knockback), sneaky | Slow |
-| **Pepper**, pup | Tennis Ball Gatling | Nose sniffs out hidden enemies | Butterfingers: drops the remote when hit |
-| **Kiwi**, budgie | Egg Bombs | Flies over furniture | Featherweight |
+| Team Pets | Weapon | Up close | + Strength | - Weakness |
+|---|---|---|---|---|
+| **Willow**, tabby cat | Laser Pointer Blaster | **Pounce**: hop forward and swipe | Invisible when still; *Vanish*; double-damage ambushes | Fragile |
+| **Biscuit**, chonky cat | Catnip Bazooka | **Making Biscuits**: kneads you, heals herself | Heavy (half knockback), sneaky | Slow |
+| **Pepper**, pup | Tennis Ball Gatling | **Gimme!**: a bite that steals the remote | Nose sniffs out hidden enemies | Butterfingers: drops the remote when hit |
+| **Kiwi**, budgie | Egg Bombs | **Peck Peck Peck**: mash it; topples even shelves | Flies over furniture | Featherweight |
 
-| Team Robots | Weapon | + Strength | - Weakness |
-|---|---|---|---|
-| **Zoomba**, robot vacuum | Dust Cannon | Hides under furniture for ambushes | Flips over when hit hard |
-| **Unit-7**, helper bot | Toaster Cannon | X-ray vision; rebuilds twice as fast | Clunky |
-| **The Claw**, ceiling gantry | Wrecking Ball | Rides the ceiling; lifts heavy things alone | Long reboot after a KO |
-| **Bass**, smart speaker | Subwoofer Cannon | Cleaning playlist speeds up the team's tidying | No legs: tiny dash |
+| Team Robots | Weapon | Up close | + Strength | - Weakness |
+|---|---|---|---|---|
+| **Zoomba**, robot vacuum | Dust Cannon | **Spot Clean**: spins, flinging everyone around it | Hides under furniture for ambushes | Flips over when hit hard |
+| **Unit-7**, helper bot | Toaster Cannon | **Spatula Flip**: flips you into the air, stunned | X-ray vision; rebuilds twice as fast | Clunky |
+| **The Claw**, ceiling gantry | Wrecking Ball | **Yoink!**: reels you in under the claw | Rides the ceiling; lifts heavy things alone | Long reboot after a KO |
+| **Bass**, smart speaker | Subwoofer Cannon | **Feedback**: a squeal that blasts you away | Cleaning playlist speeds up everyone's cleaning | No legs: tiny dash |
 
 Everyone also has a **gag**: a big, silly, charge-up move themed on what they are,
 which also plays to their strengths:
@@ -91,15 +113,58 @@ add or remove them in the lobby.
 
 ### Controls
 
-| | Keyboard | Gamepad |
-|---|---|---|
-| Move | WASD / arrows | left stick |
-| Attack (hold for automatic weapons) | J | X |
-| Special | K | Y |
-| Gag (when the meter is full) | I or Q | Right bumper |
-| Dash | Space | A |
-| Throw the remote / hold to tidy | E | B |
-| Leave the match | Esc | |
+| | Keyboard | Joy-Con, held sideways | Other controllers |
+|---|---|---|---|
+| Move | WASD / arrows | stick | left stick or D-pad |
+| Attack (hold for automatic weapons) | J | left button | left face button (Xbox X, Switch Y) |
+| Special | K | top button | top face button (Xbox Y, Switch X) |
+| Dash | Space | bottom button | bottom face button (Xbox A, Switch B) |
+| Up close move / throw the remote / hold to tidy | E | right button | right face button (Xbox B, Switch A) |
+| Gag (when the meter is full) | I or Q | SL or SR | a shoulder button or trigger |
+| Menu (pauses in Practice) | Esc | + or - | Start or Back |
+| Fullscreen on/off | F11 or Alt+Enter | | |
+
+Buttons go by position, not by the letter printed on them, so a Joy-Con works the
+same whichever way round it is.
+
+### Everyone on one screen (Joy-Cons and a TV)
+
+Up to 8 people can play on one computer, each with their own controller, all on
+one screen (cast or plug the laptop into the TV).
+
+1. **Pair each Joy-Con with the computer.** Windows: *Settings > Bluetooth & devices >
+   Add device > Bluetooth*. Mac: *System Settings > Bluetooth*. Hold the small round sync
+   button on the Joy-Con's inner edge (between SL and SR) until its lights run, then pick
+   "Joy-Con (L)" or "Joy-Con (R)" from the list. Other controllers pair the same way or
+   just plug in.
+2. **Start the game** and choose **Practice vs bots** (or **Host a game** if friends
+   elsewhere are joining too).
+3. **In the lobby, everyone joins:** hold your Joy-Con sideways and press **SL + SR**
+   together (the two small buttons on its inner edge), just like on a Switch. Two
+   Joy-Cons held together as one controller, or a Pro/Xbox controller: press **L + R**
+   (other controllers also join with any button). On the keyboard: **J**. The first
+   person becomes P1, the next P2, and so on. Each person's number and colour (P1 red,
+   P2 blue, P3 yellow, P4 green...) marks their pick on the character list, floats over
+   their character's head and labels their card at the bottom of the screen. Ignore the
+   lights on the Joy-Con itself.
+4. **Push the stick left or right** to change character. Anyone's **+ or -** starts a
+   3-second countdown (press again to wait). Add bots with the buttons on the left to
+   fill out the teams; if the house is full, bots make room for people.
+
+Good to know:
+- **A left and right Joy-Con count as two players** even though the computer merges
+  them into one controller: each person presses SL + SR on their own half.
+- **If a Joy-Con disconnects** (they doze off after a while), the game pauses until it's
+  back: wake it with any button and its player carries on. If it comes back as half of
+  a pair and the game can't tell whose it is, press any button on that half. A spare
+  Joy-Con held sideways (SL + SR) can stand in. Esc carries on without them.
+- **+ or - opens the menu** (and pauses when everyone playing is on this screen). The
+  stick picks, the bottom button chooses. From a controller the menu offers "Keep
+  playing" and "Back to lobby"; only the keyboard or mouse can leave the match.
+- **Invisible cats and hidden Zoombas** can't be invisible to only half a sofa, so when
+  both teams share the screen they look the way teammates see them: see-through.
+- **Playing alone?** No joining needed: the keyboard and any controller just work. If
+  you joined on a controller and it dies, press J to carry on with the keyboard.
 
 ### Playing with friends
 
@@ -151,13 +216,19 @@ tools/smoke_test.sh path/to/godot
 
 Runs headless (no window): imports the project, checks that every sound the game
 asks for exists, plays a full 3v3 bot match on every home at top speed (checking the
-phase sounds and music fire), then plays a real host + client network match over
-localhost and checks that both machines agree on the map and the result. Takes
+phase sounds and music fire), checks the walls' rules (`tests/walls_test.gd`) and the cleanup's (`tests/chores_test.gd`: who owns
+what, work rates, the two-helper rule, repair steps and each character's own way of cleaning) and the pickups
+(`tests/pickups_test.gd`), then plays a real host + client network match over
+localhost and checks that both machines agree on the map and the result. Two
+scripted tests run too: `tests/couch_test.gd` (shared screen, with fake Joy-Cons) and
+`tests/melee_test.gd` (every character's close-up move, and what each one does). Takes
 about a minute and a half. The same
 checks run on GitHub for every push (`.github/workflows/smoke-test.yml`).
 
 The game also takes launch options after `--`, which the tests use:
 `--practice`, `--host`, `--join=IP`, `--map=studio`, `--bots=N`, `--char=willow`, `--autostart=N`,
-`--autopilot`, `--war=SECONDS`, `--cleanup=SECONDS`, `--quit-after=SECONDS`,
+`--autopilot`, `--war=SECONDS`, `--cleanup=SECONDS`, `--captures=N`, `--quit-after=SECONDS`,
+`--generic_bots=N` (the first N bots ignore their specialty, to measure how much it matters),
+`--pickups=0` (nothing pops up),
 `--screenshot=PATH@SECONDS`, `--mute`, `--audio-log` (prints every sound as it plays). For example, `godot --path game -- --practice --bots=5 --autostart=1`
 drops you straight into a 3v3 match.

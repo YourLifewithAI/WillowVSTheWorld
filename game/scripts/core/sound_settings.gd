@@ -6,7 +6,9 @@ extends RefCounted
 const ROWS := [["Master", "Volume"], ["Music", "Music"], ["SFX", "Effects"]]
 
 
-static func build() -> GridContainer:
+## `focusable` false makes the sliders mouse-only (in a match, where the
+## arrow keys also move your character).
+static func build(focusable: bool = true) -> GridContainer:
 	var grid := GridContainer.new()
 	grid.columns = 2
 	grid.add_theme_constant_override("h_separation", 8)
@@ -21,6 +23,8 @@ static func build() -> GridContainer:
 		slider.value = Audio.volumes[bus]
 		slider.custom_minimum_size = Vector2(130, 14)
 		slider.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		if not focusable:
+			slider.focus_mode = Control.FOCUS_NONE
 		slider.value_changed.connect(func(v: float) -> void: Audio.set_volume(bus, v))
 		if bus != "Music":
 			# Let you hear how loud effects are now.
