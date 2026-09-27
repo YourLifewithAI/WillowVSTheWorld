@@ -28,6 +28,10 @@ var local_name := "Player"
 var local_char := "willow"
 ## Which home the host picked (see Maps).
 var map_id := Maps.DEFAULT
+## Which powerups can turn up (see Pickups.MENU): the host picks, in the lobby.
+var powerups: Array = Pickups.MENU.duplicate()
+## The match being loaded is a warm-up (see Match.warmup).
+var warming_up := false
 var in_match := false
 var online := false
 ## True once a --practice/--host/--join launch option has been used, so
@@ -48,6 +52,7 @@ var autolaunched := false
 ##   --mute            no sound this run;  --audio-log  print every sound as it plays
 ##   --guests=N        host adds N guests on its own screen (tests; drive them with --autopilot)
 ##   --fake-pads=ID:KIND[:SERIAL],...   pretend controllers are plugged in (tests; see Seats)
+##   --warmup=0        start matches from the lobby without the warm-up
 var options: Dictionary = {}
 
 var _next_local_id := -1
@@ -312,10 +317,17 @@ func can_start() -> bool:
 	return is_host() and counts[0] > 0 and counts[1] > 0
 
 
-func start_match() -> void:
+## Starts a match (`warmup`: a warm-up first, see Match.warmup). Starting a
+## warm-up again, while one is on, reloads it (someone joined).
+func start_match(warmup: bool = false) -> void:
 	if not can_start():
 		return
-	_cl_begin_match.rpc(roster, map_id)
+	_cl_begin_match.rpc(roster, map_id, powerups, warmup)
+
+
+## Should a match started from the lobby begin with a warm-up?
+func wants_warmup() -> bool:
+	return options.get("warmup", "1") != "0" and not options.has("autopilot")
 
 
 func return_to_lobby() -> void:
@@ -344,6 +356,17 @@ func _srv_register(info: Dictionary) -> void:
 	_maybe_autostart()
 
 
+## Host only: let a kind of powerup turn up, or not.
+func set_powerup(kind: int, on: bool) -> void:
+	if not is_host() or not kind in Pickups.MENU or (kind in powerups) == on:
+		return
+	if on:
+		powerups.append(kind)
+	else:
+		powerups.erase(kind)
+	_broadcast_roster()
+
+
 ## Host only: pick the home to fight in.
 func set_map(id: String) -> void:
 	if is_host() and Maps.exists(id):
@@ -352,22 +375,25 @@ func set_map(id: String) -> void:
 
 
 func _broadcast_roster() -> void:
-	_cl_roster.rpc(roster, map_id)
+	_cl_roster.rpc(roster, map_id, powerups)
 
 
 @rpc("authority", "call_local", "reliable")
-func _cl_roster(new_roster: Dictionary, new_map: String) -> void:
+func _cl_roster(new_roster: Dictionary, new_map: String, new_powerups: Array) -> void:
 	roster = new_roster
 	map_id = new_map
+	powerups = new_powerups
 	roster_changed.emit()
 
 
 @rpc("authority", "call_local", "reliable")
-func _cl_begin_match(final_roster: Dictionary, final_map: String) -> void:
+func _cl_begin_match(final_roster: Dictionary, final_map: String, final_powerups: Array, warmup: bool) -> void:
 	get_tree().paused = false
 	Seats.unmute_all()
 	roster = final_roster
 	map_id = final_map
+	powerups = final_powerups
+	warming_up = warmup
 	in_match = true
 	get_tree().change_scene_to_file(MATCH_SCENE)
 
@@ -399,7 +425,7 @@ func _on_peer_connected(id: int) -> void:
 			# No late joining yet: politely hang up on them.
 			(multiplayer.multiplayer_peer as ENetMultiplayerPeer).disconnect_peer(id)
 			return
-		_cl_roster.rpc_id(id, roster, map_id)
+		_cl_roster.rpc_id(id, roster, map_id, powerups)
 
 
 func _on_peer_disconnected(id: int) -> void:

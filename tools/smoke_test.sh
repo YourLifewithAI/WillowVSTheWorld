@@ -81,7 +81,7 @@ for MAP in $MAPS; do
 done
 
 echo "== Shared screen: four people on fake Joy-Cons and a controller"
-"$GODOT" --headless --fixed-fps 60 --path "$GAME" res://tests/couch_test.tscn -- --war=60 --cleanup=5 --pickups=0 \
+"$GODOT" --headless --fixed-fps 60 --path "$GAME" res://tests/couch_test.tscn -- --war=60 --cleanup=5 --pickups=0 --warmup=0 \
   > "$OUT/couch.log" 2>&1
 no_script_errors "$OUT/couch.log" "couch"
 grep -E "^  (PASS|FAIL)  couch:" "$OUT/couch.log"
@@ -122,6 +122,24 @@ echo "== Close-up moves: every character's, and what each one does"
 no_script_errors "$OUT/melee.log" "melee"
 grep -E "^  (PASS|FAIL)  melee:" "$OUT/melee.log"
 if grep -q "FAIL  melee:" "$OUT/melee.log" || ! grep -q "^\[melee\] [0-9]* passed, 0 failed" "$OUT/melee.log"; then
+  FAILED=1
+fi
+
+echo "== Aiming: tap to fire, hold to aim, a second stick, keyboard diagonals, passing the remote"
+"$GODOT" --headless --fixed-fps 60 --path "$GAME" res://tests/aim_test.tscn -- --war=300 --pickups=0 \
+  > "$OUT/aim.log" 2>&1
+no_script_errors "$OUT/aim.log" "aim"
+grep -E "^  (PASS|FAIL)  aim:" "$OUT/aim.log"
+if grep -q "FAIL  aim:" "$OUT/aim.log" || ! grep -q "^\[aim\] [0-9]* passed, 0 failed" "$OUT/aim.log"; then
+  FAILED=1
+fi
+
+echo "== Warm-up: dummies, no KOs, a checklist, joining partway, everyone ready"
+"$GODOT" --headless --fixed-fps 60 --path "$GAME" res://tests/warmup_test.tscn -- --mute \
+  > "$OUT/warmup.log" 2>&1
+no_script_errors "$OUT/warmup.log" "warmup"
+grep -E "^  (PASS|FAIL)  warmup:" "$OUT/warmup.log"
+if grep -q "FAIL  warmup:" "$OUT/warmup.log" || ! grep -q "^\[warmup\] [0-9]* passed, 0 failed" "$OUT/warmup.log"; then
   FAILED=1
 fi
 

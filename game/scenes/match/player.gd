@@ -41,6 +41,28 @@ const GAG_CHARGE_TIME := 55.0
 const GAG_PER_DAMAGE := 0.003
 ## Speed while wading through an enemy litter cloud.
 const CLOUD_SLOW := 0.6
+## In the warm-up, the super meter fills this fast (seconds).
+const WARMUP_SUPER_TIME := 5.0
+## Hold-to-aim (people, not bots): holding attack this long (or, carrying the
+## remote, the throw button) plants you and the stick only turns you; letting
+## go fires (or throws). A quick tap fires straight away.
+const AIM_DELAY := 0.15
+## A shot let go of while still reloading goes off as soon as it can, if that's this soon.
+const FIRE_BUFFER := 0.3
+## Keyboard and D-pad: letting go of one key of a diagonal this long before the
+## other still leaves you facing the diagonal.
+const DIAGONAL_GRACE := 0.1
+## After a second stick lets go, how long you keep facing where it pointed.
+const FREE_AIM_HOLD := 0.35
+## Aim assist: how far off (degrees either side) an enemy can be and still get
+## the shot, aiming with the moving stick or keys, a second stick, the mouse.
+const ASSIST_CONE := 25.0
+const ASSIST_STICK := 12.0
+const ASSIST_MOUSE := 5.0
+## Throwing the remote: how far off (degrees) a teammate can be and still
+## catch it, after a quick tap and after aiming.
+const PASS_CONE := 45.0
+const PASS_CONE_AIMED := 25.0
 
 var pid := 0
 var char_id := "willow"
@@ -119,6 +141,27 @@ var _send_accum := 0.0
 var _proj_counter := 0
 var _ghost_t := 0.0
 var _crash_cd: Dictionary = {}
+var _dash_dir := Vector2.RIGHT
+## Hold-to-aim: the button being held to aim ("attack", "throw" or ""), for
+## how long, and whether that's long enough that we're planted and aiming.
+var aiming := false
+var _hold := ""
+var _hold_t := 0.0
+var _was_aiming := false
+var _fire_buffer := 0.0
+## This tick's second-stick or mouse aim (floor space, or zero), how long since
+## it was last used, how much aim assist the way we're aiming gets, and how far
+## away the mouse is.
+var _free_aim := Vector2.ZERO
+var _free_aim_t := 10.0
+var _aim_cone := ASSIST_CONE
+var _mouse_dist := 0.0
+## The last diagonal the keys pointed (see _turn).
+var _diag := Vector2.ZERO
+var _diag_t := 10.0
+## Which moves this character has tried (for the warm-up's checklist):
+## "move", "attack", "aim", "special", "interact", "dash", "gag", "pass".
+var tried: Dictionary = {}
 
 # --- Everyone else: smoothing toward the last received position.
 var _net_pos := Vector2.ZERO
@@ -152,6 +195,8 @@ var _pounce_ambush := false
 var _pointer: Dictionary = {}
 var _pointer_t := 0.0
 var _all_done := false
+## Cleanup, on this screen: standing by a job that holding interact would work.
+var _job_here := false
 
 
 func setup(p_id: int, info: Dictionary, p_arena: Match) -> void:
@@ -281,30 +326,48 @@ func _owner_tick(delta: float) -> void:
 	vanish_t = maxf(0.0, vanish_t - delta)
 	_reveal_t = maxf(0.0, _reveal_t - delta)
 	_buff_t = maxf(0.0, _buff_t - delta)
+	_fire_buffer = maxf(0.0, _fire_buffer - delta)
 	if _buff_t <= 0.0:
 		buff_mult = 1.0
 
 	if captured_by != 0:
 		_pounce = {}
+		_cancel_hold()
 		_follow_captor()
 		return
 	if arena.phase == Match.Phase.WAR and not is_ko:
 		var was_ready := gag_charge >= 1.0
-		gag_charge = minf(1.0, gag_charge + delta / GAG_CHARGE_TIME)
+		gag_charge = minf(1.0, gag_charge + delta / (WARMUP_SUPER_TIME if arena.warmup else GAG_CHARGE_TIME))
 		if gag_charge >= 1.0 and not was_ready and is_local():
 			if arena.shared_screen():
 				sound("gag_ready")
-				Fx.text(arena.level.entities, position + Vector2(0, -sprite_height() - z - 10), "GAG READY!", marker_color())
+				Fx.text(arena.level.entities, position + Vector2(0, -sprite_height() - z - 10), "SUPER READY!", marker_color())
 			else:
 				Audio.play("gag_ready")
 
 	var inp := _gather_input()
 	var free_to_act := arena.can_move() and not is_ko and stun <= 0.0
-	var move: Vector2 = inp["move"] if free_to_act and _slam_t <= 0.0 else Vector2.ZERO
-	if move.length() > 1.0:
-		move = move.normalized()
-	if move.length() > 0.2:
-		facing = move.normalized()
+	var person := brain != null and brain.hold_to_aim
+	_read_free_aim(inp, delta)
+	var released := _track_hold(inp, delta, free_to_act and person)
+	var steer: Vector2 = inp["move"] if free_to_act and _slam_t <= 0.0 else Vector2.ZERO
+	if steer.length() > 1.0:
+		steer = steer.normalized()
+	var move := steer
+	if aiming:
+		# Planted: the stick only turns you.
+		if steer.length() > 0.5:
+			_turn(steer)
+		move = Vector2.ZERO
+	elif _free_aim != Vector2.ZERO:
+		facing = _free_aim
+	elif steer.length() > 0.2 and _free_aim_t >= FREE_AIM_HOLD:
+		_turn(steer)
+	_diag_t += delta
+	if move.length() > 0.5:
+		tried["move"] = true
+	if aiming:
+		tried["aim"] = true
 
 	var speed: float = data["speed"] * buff_mult
 	if carrying:
@@ -316,7 +379,7 @@ func _owner_tick(delta: float) -> void:
 
 	if _dash_t > 0.0:
 		_dash_t -= delta
-		v = facing * DASH_SPEED
+		v = _dash_dir * DASH_SPEED
 	if data.get("flying", false) and not is_ko and _slam_t <= 0.0 and not is_equal_approx(z, hover()):
 		z = move_toward(z, hover(), 60.0 * delta)  # sinking under the remote's weight, or rising again
 	if _slam_t > 0.0:
@@ -340,7 +403,8 @@ func _owner_tick(delta: float) -> void:
 	moving = v.length() > 5.0
 	dashing = _dash_t > 0.0
 	tumbling = knock_vel.length() > TUMBLE_SPEED
-	interacting = bool(inp["interact"]) and not is_ko and arena.can_move()
+	# (Holding the button to aim a throw isn't tidying.)
+	interacting = bool(inp["interact"]) and not is_ko and arena.can_move() and _hold != "throw"
 	_update_stealth(delta)
 	if not _pounce.is_empty():
 		_resolve_pounce()
@@ -348,23 +412,224 @@ func _owner_tick(delta: float) -> void:
 	if not free_to_act:
 		return
 	var at_war := arena.phase == Match.Phase.WAR
-	if inp["interact_pressed"] and carrying:
-		arena.request_throw(self, facing)
+	if carrying:
+		_throw_input(inp, released, person)
 	if inp["dash"] and dash_cd <= 0.0 and not carrying and _slam_t <= 0.0:
+		# Dashing goes where you're steering (which may not be where you aim).
+		_cancel_hold()
 		_dash_t = DASH_TIME * float(data.get("dash_mult", 1.0))
+		_dash_dir = steer.normalized() if steer.length() > 0.2 else facing
 		dash_cd = DASH_COOLDOWN
+		tried["dash"] = true
 		_play_action.rpc(Action.DASH, facing)
 	if not at_war or carrying or _slam_t > 0.0:
 		return
-	var auto_fire: bool = inp.get("attack_held", false) and float(weapon_spec()["cooldown"]) < 0.2
+	var fire := _wants_to_fire(inp, released, person)
 	if inp["interact_pressed"] and melee_cd <= 0.0:
 		_do_melee()
-	elif (inp["attack"] or auto_fire) and attack_cd <= 0.0:
+	elif fire and attack_cd <= 0.0:
+		_fire_buffer = 0.0
 		_do_attack()
 	elif inp["special"] and special_cd <= 0.0:
 		_do_special()
 	elif inp.get("gag", false) and gag_charge >= 1.0:
 		_do_gag()
+
+
+# ==================================================================== aiming
+
+## The second stick, or the mouse (for whoever plays on the keyboard): they aim
+## while the first stick (or WASD) moves.
+func _read_free_aim(inp: Dictionary, delta: float) -> void:
+	_free_aim = Vector2.ZERO
+	var stick: Vector2 = inp.get("aim", Vector2.ZERO)
+	if inp.get("mouse", false):
+		var off := Iso.to_floor(arena.mouse_in_level() - position)
+		if off.length() > 6.0:
+			_free_aim = off.normalized()
+			_mouse_dist = off.length()
+			_aim_cone = ASSIST_MOUSE
+	elif stick.length() > 0.1:
+		_free_aim = stick.normalized()
+		_aim_cone = ASSIST_STICK
+	if _free_aim != Vector2.ZERO:
+		_free_aim_t = 0.0
+		return
+	_free_aim_t += delta
+	if _free_aim_t >= FREE_AIM_HOLD:
+		_aim_cone = ASSIST_CONE
+		_mouse_dist = 0.0
+
+
+## Hold-to-aim (people only), before moving: pressing attack (or, carrying the
+## remote, throw) starts a hold, and after AIM_DELAY you're planted and aiming.
+## Returns the button let go this tick ("attack", "throw" or ""). Aiming with a
+## second stick or the mouse needs no hold: those fire on the press.
+func _track_hold(inp: Dictionary, delta: float, active: bool) -> String:
+	if not active:
+		_cancel_hold()
+		return ""
+	if _hold == "":
+		var free := _free_aim != Vector2.ZERO
+		if carrying and inp["interact_pressed"] and not free:
+			_hold = "throw"
+		elif not carrying and inp["attack"] and not free and arena.phase == Match.Phase.WAR and _slam_t <= 0.0 \
+				and not _weapon_is_melee():
+			_hold = "attack"
+		_hold_t = 0.0
+		if _hold == "":
+			return ""
+	# The remote got knocked away (or caught), or the war's over: never mind.
+	if (_hold == "throw") != carrying or (_hold == "attack" and arena.phase != Match.Phase.WAR):
+		_cancel_hold()
+		return ""
+	var held: bool = inp["interact"] if _hold == "throw" else inp.get("attack_held", false)
+	if held:
+		_hold_t += delta
+		aiming = _hold_t >= AIM_DELAY
+		return ""
+	var what := _hold
+	var was := aiming
+	_cancel_hold()
+	_was_aiming = was
+	return what
+
+
+func _cancel_hold() -> void:
+	_hold = ""
+	_hold_t = 0.0
+	aiming = false
+	_was_aiming = false
+
+
+## Faces the way the moving stick (or keys) point. Letting go of a diagonal's
+## two keys a moment apart would leave you facing along whichever went last,
+## so a diagonal sticks for DIAGONAL_GRACE after one of its keys lets go.
+func _turn(dir: Vector2) -> void:
+	var d := dir.normalized()
+	if absf(absf(d.x) - absf(d.y)) < 0.02:
+		_diag = d
+		_diag_t = 0.0
+	elif (d.x == 0.0 or d.y == 0.0) and _diag_t < DIAGONAL_GRACE and d.dot(_diag) > 0.6:
+		return
+	facing = d
+
+
+## Does the attack button fire this tick? Bots, and swinging weapons, go off on
+## the press (automatic weapons: all the while it's held). People fire when
+## they let go (see _track_hold), or on the press when aiming with a second
+## stick or the mouse; a shot let go of while reloading waits a moment.
+func _wants_to_fire(inp: Dictionary, released: String, person: bool) -> bool:
+	if float(weapon_spec()["cooldown"]) < 0.2:
+		return inp["attack"] or inp.get("attack_held", false)
+	if not person or _weapon_is_melee():
+		return inp["attack"]
+	if released == "attack" or (inp["attack"] and _free_aim != Vector2.ZERO):
+		_fire_buffer = FIRE_BUFFER
+	return _fire_buffer > 0.0
+
+
+## Aim assist (people only): turns `dir` onto the enemy nearest to it, if one
+## we can see is close enough to that line (see ASSIST_CONE) and in reach.
+func _assisted(dir: Vector2, reach: float, extra_cone: float = 0.0, over_walls: bool = false) -> Vector2:
+	if brain == null or not brain.hold_to_aim:
+		return dir
+	var t := assist_target(dir, reach, _aim_cone + extra_cone, over_walls)
+	return Iso.to_floor(t.position - position).normalized() if t else dir
+
+
+## The enemy a shot toward `dir` would be nudged onto: the nearest one to that
+## line within `cone` degrees and `reach`, that this team can see, with no wall
+## in the way (unless the shot sails over walls). Null if there's nobody.
+func assist_target(dir: Vector2, reach: float, cone: float, over_walls: bool = false) -> Player:
+	var best: Player = null
+	var best_score := INF
+	for other: Player in arena.players.values():
+		if other.team == team or other.is_ko or other.captured_by != 0 or not arena.is_revealed(other, team):
+			continue
+		var off := Iso.to_floor(other.position - position)
+		var d := off.length()
+		if d < 1.0 or d > reach + BODY_RADIUS:
+			continue
+		var ang := absf(rad_to_deg(dir.angle_to(off)))
+		if ang > cone or (not over_walls and _walled(position, other.position)):
+			continue
+		var score := ang + d * 0.1
+		if score < best_score:
+			best = other
+			best_score = score
+	return best
+
+
+## How far a weapon's shots go (floor px). Lobbed shells also catch whoever is
+## near where they land.
+func _reach_of(w: Dictionary) -> float:
+	var reach := float(w.get("range", 0.0))
+	if int(w.get("kind", -1)) == Roster.Weapon.LOB:
+		reach += float(w.get("explode_radius", 0.0)) * 0.5
+	return reach
+
+
+func _lobs(w: Dictionary) -> bool:
+	return int(w.get("kind", -1)) == Roster.Weapon.LOB or w.get("through_walls", false)
+
+
+## Carrying the remote: throw it, to a teammate if one is roughly that way.
+## People: a tap throws, holding plants you to aim, letting go throws; with a
+## second stick or the mouse it goes the moment you press.
+func _throw_input(inp: Dictionary, released: String, person: bool) -> void:
+	var cone := PASS_CONE
+	if not person:
+		if not inp["interact_pressed"]:
+			return
+	elif released == "throw":
+		cone = PASS_CONE_AIMED if _was_aiming else PASS_CONE
+	elif inp["interact_pressed"] and _free_aim != Vector2.ZERO:
+		cone = PASS_CONE_AIMED
+	else:
+		return
+	tried["pass"] = true
+	var mate := pass_target(facing, cone)
+	if mate:
+		var off := Iso.to_floor(_lead(mate) - position)
+		if off.length() > 1.0:
+			facing = off.normalized()
+		arena.request_throw(self, facing, off.length())
+	elif _mouse_dist > 0.0:
+		arena.request_throw(self, facing, minf(_mouse_dist, Match.THROW_RANGE))
+	else:
+		arena.request_throw(self, facing)
+
+
+## The teammate a throw toward `dir` goes to: the one nearest that line, within
+## `cone` degrees and throwing range, with no wall in the way (or null).
+func pass_target(dir: Vector2, cone: float) -> Player:
+	var best: Player = null
+	var best_score := INF
+	for p: Player in arena.players.values():
+		if p == self or p.team != team or p.is_ko or p.captured_by != 0:
+			continue
+		var off := Iso.to_floor(p.position - position)
+		var d := off.length()
+		if d < 12.0 or d > Match.THROW_RANGE + Match.PICKUP_RADIUS:
+			continue
+		var ang := absf(rad_to_deg(dir.angle_to(off)))
+		if ang > cone or _walled(position, p.position):
+			continue
+		var score := ang + d * 0.1
+		if score < best_score:
+			best = p
+			best_score = score
+	return best
+
+
+## Where a teammate will be when the remote gets to them, if this machine
+## knows how they're moving (it runs them); otherwise where they are.
+func _lead(mate: Player) -> Vector2:
+	var at := arena.level.clamp_to_floor(mate.position + mate.velocity * Iso.fdist(position, mate.position) / Match.THROW_SPEED)
+	if Iso.fdist(position, at) > Match.THROW_RANGE or _walled(position, at):
+		return mate.position
+	return at
 
 
 func _flags() -> int:
@@ -480,7 +745,10 @@ func pickup_status() -> String:
 
 func _do_attack() -> void:
 	var w := weapon_spec()
+	if not _weapon_is_melee():
+		facing = _assisted(facing, _reach_of(w), 0.0, _lobs(w))
 	attack_cd = w["cooldown"]
+	tried["attack"] = true
 	var ambush := stealthed
 	_break_stealth(0.6)
 	_play_action.rpc(Action.ATTACK, facing)
@@ -495,15 +763,20 @@ func _do_attack() -> void:
 func _do_melee() -> void:
 	var m: Dictionary = data["melee"]
 	melee_cd = float(m["cooldown"])
+	tried["interact"] = true
 	# Swinging up close ties up your hands for a moment: no firing mid-swipe.
 	attack_cd = maxf(attack_cd, MELEE_WEAPON_LOCK)
 	var ambush := stealthed
+	var lunge: bool = m.get("effect", "") == "lunge"
+	if float(m["arc"]) < 360.0:
+		facing = _assisted(facing, float(m["range"]) + (float(m["effect_value"]) if lunge else 0.0), 20.0)
 	_break_stealth(0.6)
 	_play_action.rpc(Action.MELEE, facing)
-	if m.get("effect", "") == "lunge":
+	if lunge:
 		# Hop forward first (a very short dash) and swipe where you land, or
 		# as soon as someone is right in front of you.
 		_dash_t = float(m["effect_value"]) / DASH_SPEED
+		_dash_dir = facing
 		_pounce = m
 		_pounce_ambush = ambush
 		return
@@ -534,6 +807,12 @@ func _enemy_ahead(reach: float, half_arc: float) -> bool:
 func _do_gag() -> void:
 	var g: Dictionary = data["gag"]
 	gag_charge = 0.0
+	tried["gag"] = true
+	match int(g["kind"]):
+		Roster.Gag.LITTER:
+			facing = _assisted(facing, float(g["range"]), 0.0, true)
+		Roster.Gag.FLOCK:
+			facing = _assisted(facing, float(g["length"]), 10.0)
 	_break_stealth(0.3)
 	_play_action.rpc(Action.GAG, facing)
 	match int(g["kind"]):
@@ -607,6 +886,7 @@ func _follow_captor() -> void:
 func _do_special() -> void:
 	var sp: Dictionary = data["special"]
 	special_cd = sp["cooldown"]
+	tried["special"] = true
 	var ambush := stealthed
 	if int(sp["kind"]) == Roster.Special.VANISH:
 		vanish_t = float(sp["duration"])
@@ -614,6 +894,8 @@ func _do_special() -> void:
 		_reveal_t = 0.0
 		_play_action.rpc(Action.SPECIAL, facing)
 		return
+	if int(sp["kind"]) == Roster.Special.PROJECTILE:
+		facing = _assisted(facing, float(sp["range"]))
 	_break_stealth(0.6)
 	_play_action.rpc(Action.SPECIAL, facing)
 	match int(sp["kind"]):
@@ -977,6 +1259,8 @@ func reset_for_phase() -> void:
 	shield_t = 0.0
 	turbo_t = 0.0
 	if is_multiplayer_authority():
+		_cancel_hold()
+		_fire_buffer = 0.0
 		buff_mult = 1.0
 		_buff_t = 0.0
 		knock_vel = Vector2.ZERO
@@ -1091,12 +1375,17 @@ func _process(delta: float) -> void:
 func _update_pointer(delta: float) -> void:
 	if arena.phase != Match.Phase.CLEANUP or not is_local():
 		_pointer = {}
+		_job_here = false
 		return
 	_pointer_t -= delta
 	if _pointer_t > 0.0:
 		return
 	_pointer_t = 0.25
 	_pointer = arena.pointer_for(self)
+	var job := arena.job_here(self)
+	# (Driving or running over your own chore needs no button.)
+	_job_here = job != null and not (arena.has_owner_move(self) and arena.chore_of(job) == arena.my_chore(self)
+		and arena.my_chore(self) != Chores.Chore.STAIN)
 	# Done once nothing of this chore is left, not even steps still to come.
 	var mine := arena.my_chore(self)
 	var done: bool = mine != Chores.Chore.NONE and int(arena.chore_totals().get(mine, [0, 0.0])[0]) == 0
@@ -1155,6 +1444,7 @@ func _draw() -> void:
 	col.a = 0.95 if is_local() or _revealed else 0.55
 	draw_polyline(ring, col, 2.0 if is_local() and arena.shared_screen() else 1.0)
 	_draw_pointer()
+	_draw_aim()
 	# The Claw hangs from a cable on a trolley that rides the ceiling rails.
 	if char_id == "claw" and not is_ko:
 		var top := Vector2(0, round(-z) - sprite_height() + 2)
@@ -1198,6 +1488,43 @@ func _draw_pointer() -> void:
 		col if _pointer["own"] else Color(0.8, 0.8, 0.8))
 
 
+## In the war, on this screen: a notch on the ring shows which way you're
+## facing; planted and aiming, a dotted line shows where the shot (or the
+## remote) will go, with a mark on whoever the aim assist (or the pass) picks.
+func _draw_aim() -> void:
+	if not is_local() or is_ko or captured_by != 0 or arena.phase != Match.Phase.WAR:
+		return
+	var col := marker_color() if arena.shared_screen() else Color.WHITE
+	var dir := facing.normalized()
+	var tip := Iso.to_screen(dir * 13.5)
+	var base := Iso.to_screen(dir * 10.5)
+	var side := Iso.to_screen(dir.orthogonal() * 2.5)
+	draw_colored_polygon(PackedVector2Array([tip, base + side, base - side]), col)
+	if not aiming:
+		return
+	var target: Player = null
+	var end := Vector2.ZERO
+	if _hold == "throw":
+		target = pass_target(dir, PASS_CONE_AIMED)
+		end = target.position - position if target else Iso.to_screen(dir * Match.THROW_RANGE)
+	else:
+		var w := weapon_spec()
+		var reach := minf(_reach_of(w), 160.0)
+		target = assist_target(dir, reach, _aim_cone, _lobs(w))
+		end = target.position - position if target else Iso.to_screen(dir * reach)
+	var start := Iso.to_screen(dir * 15.0)
+	var steps := int(start.distance_to(end) / 5.0)
+	for k in steps:
+		var at := start.lerp(end, (k + 0.5) / float(maxi(steps, 1)))
+		draw_circle(at, 1.0, Color(col, 0.9 if k % 2 == 0 else 0.5))
+	if target:
+		var r := Iso.ellipse(10.0, 16)
+		r.append(r[0])
+		draw_polyline(Transform2D(0, end) * r, Color("8ff0a4") if _hold == "throw" else Color("ff5a6e"), 1.5)
+	else:
+		draw_circle(end, 2.0, col)
+
+
 ## The bobbing arrow over your own character; with several people on one
 ## screen, in the seat's colour with "P2" etc. next to it.
 func _draw_you_marker(tip: Vector2) -> void:
@@ -1210,6 +1537,20 @@ func _draw_you_marker(tip: Vector2) -> void:
 		var at := tip + Vector2(-font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 7).x / 2.0, -5)
 		_overlay.draw_string_outline(font, at, label, HORIZONTAL_ALIGNMENT_LEFT, -1, 7, 3, Color("2b1d2a"))
 		_overlay.draw_string(font, at, label, HORIZONTAL_ALIGNMENT_LEFT, -1, 7, col)
+
+
+## A button picture and a word beside your head ("hold" by a job, "pass"
+## carrying the remote), for the button that does it on your controller.
+## `at` is the left edge, centred on the picture.
+func _draw_prompt(at: Vector2, word: String) -> void:
+	var font := ThemeDB.fallback_font
+	var g := Glyphs.of(seat, "interact")
+	var accent := marker_color() if arena.shared_screen() else Color("ffd84d")
+	var bob := Vector2(0, roundf(sin(_anim_t * 4.0)))
+	var gw := Glyphs.draw(_overlay, at + bob, g, 11.0, accent, font)
+	var base := at + bob + Vector2(gw + 2.0, 3.0)
+	_overlay.draw_string_outline(font, base, word, HORIZONTAL_ALIGNMENT_LEFT, -1, 7, 3, Glyphs.INK)
+	_overlay.draw_string(font, base, word, HORIZONTAL_ALIGNMENT_LEFT, -1, 7, Color.WHITE)
 
 
 func _draw_overlay() -> void:
@@ -1231,6 +1572,8 @@ func _draw_overlay() -> void:
 	if arena.phase != Match.Phase.WAR and arena.phase != Match.Phase.COUNTDOWN:
 		if is_local():
 			_draw_you_marker(head + Vector2(0, sin(_anim_t * 5.0)))
+			if _job_here and not interacting:
+				_draw_prompt(head + Vector2(8, 5), "hold")
 		return
 	# Health pip bar.
 	var w := 14.0
@@ -1241,6 +1584,8 @@ func _draw_overlay() -> void:
 	_overlay.draw_rect(Rect2(bar.position, Vector2(round(w * frac), 2)), hp_col)
 	if is_local():
 		_draw_you_marker(head + Vector2(0, -4 + sin(_anim_t * 5.0)))
+		if carrying and arena.phase == Match.Phase.WAR:
+			_draw_prompt(head + Vector2(10, 4), "pass")
 	if _revealed:
 		# A little eye: someone's nose or x-ray vision has spotted you.
 		var eye := head + Vector2(0, -7)

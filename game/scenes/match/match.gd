@@ -21,11 +21,12 @@ const PICKUP_RADIUS := 14.0
 const FIX_RADIUS := 24.0
 const DEBRIS_RADIUS := 16.0
 const THROW_SPEED := 260.0
-const THROW_TIME := 0.45
+## How far the remote flies (floor px) when it isn't thrown to anyone in particular.
+const THROW_RANGE := 140.0
 const TIDY_PASS := 0.6
 const TIDY_SPOTLESS := 0.9
 ## Seconds you must stand on your base, unhurt, to change the channel.
-const CHANNEL_TIME := 2.0
+const CHANNEL_TIME := 3.0
 ## Damage multiplier for a hit landed from stealth.
 const AMBUSH_MULT := 2.0
 ## Knockback above this flips a character with the "flips" weakness.
@@ -45,7 +46,9 @@ static var current: Match
 
 @export var war_time := 180.0
 @export var cleanup_time := 45.0
-@export var capture_limit := 5
+## The war ends early at this many captures (0: it runs the full clock, and
+## captures just score).
+@export var capture_limit := 0
 @export var respawn_time := 4.0
 @export var remote_return_time := 8.0
 @export var countdown_time := 3.0
@@ -120,6 +123,20 @@ var _load_timeout := 8.0
 var _nav_dirty := false
 ## Players a bot is standing in for while their controller is gone (online).
 var _stand_ins: Dictionary = {}
+## A warm-up before the real match (see Net.start_match): the war, but with the
+## clock stopped, the bots standing still as practice dummies, nobody knocked
+## out and nothing scored, and one of each powerup lying around. Everyone tries
+## every button (see Player.tried), then presses + (Enter on the keyboard)
+## when they're ready, and a fresh match starts. People can still join on a
+## controller while it's on (it reloads with them in it).
+var warmup := false
+## Warm-up: people who said they're ready (pid -> true; bots always are).
+var ready_pids: Dictionary = {}
+var _hurt_at: Dictionary = {}  # warm-up: pid -> when they were last hurt
+var _warmup_t := 0.0
+var _warmup_over := false
+## Warm-up: hurt characters heal back up after this long.
+const WARMUP_HEAL_DELAY := 2.0
 var _nav_t := 0.0
 var _next_cloud_id := 1
 var _vortices: Dictionary = {}  # Zoomba pid -> seconds left
@@ -147,6 +164,13 @@ func _ready() -> void:
 	if Net.options.has("captures"):
 		capture_limit = int(Net.options["captures"])
 	pickups_on = Net.options.get("pickups", "1") != "0"
+	warmup = Net.warming_up
+	if warmup:
+		pickups_on = false  # (one of each is laid out instead, see _tick_warmup)
+		# Late Joy-Cons can still join (the keyboard's J fires here, so not that).
+		Seats.accepting_joins = multiplayer.is_server()
+		Seats.keyboard_joins = false
+		Net.roster_changed.connect(_on_roster_changed)
 	_hang_pictures()
 	_spawn_players()
 	remote = TVRemote.new()
@@ -170,6 +194,9 @@ func _ready() -> void:
 func _exit_tree() -> void:
 	if current == self:
 		current = null
+	if warmup:
+		Seats.accepting_joins = false
+		Seats.keyboard_joins = true
 
 
 func _spawn_players() -> void:
@@ -185,8 +212,11 @@ func _spawn_players() -> void:
 		slots[p.team] += 1
 		players[id] = p
 		stats[id] = {"bonks": 0, "caps": 0, "tidied": 0.0, "own": 0}
+		if warmup:
+			p.gag_charge = 1.0  # everyone gets to try their super straight away
 		if p.is_bot and multiplayer.is_server():
-			p.brain = BotBrain.new(p, self)
+			# In the warm-up, bots are practice dummies.
+			p.brain = Controls.new() if warmup else BotBrain.new(p, self)
 		elif not p.is_bot and int(info.get("owner", id)) == Net.my_id():
 			# Someone on this screen: you (seat 0) or a guest sharing it.
 			p.seat = int(info.get("seat", 0))
@@ -227,7 +257,7 @@ func can_pause() -> bool:
 ## waits for it (see Hud.show_lost); online the host lets a bot fill in, and
 ## hands the character back as soon as the controller returns.
 func _on_seats_changed() -> void:
-	if phase == Phase.LOADING or phase == Phase.RESULTS:
+	if phase == Phase.LOADING or phase == Phase.RESULTS or not is_inside_tree():
 		return
 	var lost: Array[Player] = []
 	for p in local_players():
@@ -240,10 +270,105 @@ func _on_seats_changed() -> void:
 			p.brain = SeatInput.new(p.seat)
 			_forget_bot_plans(p)
 		elif is_lost and not _stand_ins.has(p) and not p.brain is BotBrain and not can_pause() \
-				and multiplayer.is_server() and not Net.options.has("autopilot"):
+				and multiplayer.is_server() and not Net.options.has("autopilot") and not warmup:
 			_stand_ins[p] = true
 			p.brain = BotBrain.new(p, self)
 	hud.show_lost(lost)
+
+
+# ================================================================= warm-up
+
+## Warm-up (host): hurt characters heal back up, one of each powerup that's
+## switched on lies around the house, and once every person is ready the real
+## match starts.
+func _tick_warmup(delta: float) -> void:
+	for p: Player in players.values():
+		if p.hp < p.max_hp and work_clock - float(_hurt_at.get(p.pid, -100.0)) > WARMUP_HEAL_DELAY:
+			p.hp = p.max_hp
+			_cl_heal.rpc(p.pid, p.hp)
+	_warmup_t -= delta
+	if _warmup_t <= 0.0:
+		_warmup_t = 4.0
+		var lying := {}
+		for pu: Pickup in pickups.values():
+			lying[pu.kind] = true
+		for kind: int in Net.powerups:
+			if Pickups.in_war(kind) and not lying.has(kind):
+				var at := _pickup_spot(Vector2.INF, 0.0)
+				if at != Vector2.INF:
+					var arg := ""
+					if kind == Pickups.Kind.WEAPON:
+						arg = Roster.CHARACTERS.keys().filter(func(id: String) -> bool: return Roster.get_char(id)["weapon"].has("sprite")).pick_random()
+					_cl_pickup_add.rpc(_next_pickup_id, kind, arg, at, 999.0)
+					_next_pickup_id += 1
+	if not _warmup_over and everyone_ready():
+		_warmup_over = true
+		_cl_event.rpc("Everyone's ready! Here come the parents...", Color("8ff0a4"))
+		get_tree().create_timer(1.2).timeout.connect(func() -> void: Net.start_match(false))
+
+
+## Warm-up: has every person (not the bots) said they're ready?
+func everyone_ready() -> bool:
+	for p: Player in players.values():
+		if not p.is_bot and not ready_pids.has(p.pid):
+			return false
+	return true
+
+
+## Warm-up: this person is ready (or, pressed again, not any more).
+func toggle_ready(p: Player) -> void:
+	if multiplayer.is_server():
+		_srv_ready(p.pid)
+	else:
+		_srv_ready.rpc_id(1, p.pid)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _srv_ready(pid: int) -> void:
+	var p: Player = players.get(pid)
+	if not warmup or _warmup_over or p == null or p.get_multiplayer_authority() != _sender():
+		return
+	_cl_ready.rpc(pid, not ready_pids.has(pid))
+
+
+@rpc("authority", "call_local", "reliable")
+func _cl_ready(pid: int, on: bool) -> void:
+	if on:
+		ready_pids[pid] = true
+	else:
+		ready_pids.erase(pid)
+	var p: Player = players.get(pid)
+	if p:
+		Fx.text(level.entities, p.position + Vector2(0, -p.sprite_height() - 14), "READY!" if on else "not ready", Color("8ff0a4") if on else Color.WHITE)
+		p.sound("select" if on else "tick")
+
+
+## Host, in the warm-up: host skips it (from the menu).
+func skip_warmup() -> void:
+	if multiplayer.is_server() and warmup and not _warmup_over:
+		_warmup_over = true
+		Net.start_match(false)
+
+
+## Warm-up (host): someone joined on a controller, or left. Load the warm-up
+## again with everyone in it.
+func _on_roster_changed() -> void:
+	if not is_inside_tree() or not multiplayer.is_server() or _warmup_over:
+		return
+	var same := Net.roster.size() == players.size()
+	for id: int in Net.roster:
+		same = same and players.has(id)
+	if not same and Net.can_start():
+		_warmup_over = true
+		Net.start_match(true)
+
+
+## Where the mouse is, in the level's coordinates (the keyboard player aims with it).
+func mouse_in_level() -> Vector2:
+	var box: SubViewportContainer = $World
+	var view: SubViewport = $World/SubViewport
+	var m := box.get_local_mouse_position() * Vector2(view.size) / box.size
+	return level.entities.get_global_transform().affine_inverse() * m
 
 
 ## More than one person is playing on this screen.
@@ -304,7 +429,8 @@ func _start() -> void:
 		return
 	log_event("everyone loaded after %.1f s" % (8.0 - _load_timeout))
 	_cl_start.rpc()
-	_set_phase(Phase.COUNTDOWN, countdown_time)
+	# The warm-up goes straight in (the clock won't run).
+	_set_phase(Phase.WAR if warmup else Phase.COUNTDOWN, war_time if warmup else countdown_time)
 
 
 @rpc("authority", "call_local", "reliable")
@@ -337,9 +463,14 @@ func _on_phase_entered() -> void:
 			# A controller may already have dropped out in the lobby or on the results screen.
 			_on_seats_changed()
 		Phase.WAR:
-			hud.banner("WAR!", "Carry the remote to your base")
-			Audio.play("whistle")
-			Audio.music("war")
+			if warmup:
+				hud.banner("WARM-UP!", "Try every button. The bots won't fight back.")
+				Audio.music("menu")
+				_on_seats_changed()
+			else:
+				hud.banner("WAR!", "Carry the remote to your base")
+				Audio.play("whistle")
+				Audio.music("war")
 		Phase.WHISTLE:
 			hud.banner("CAR IN THE DRIVEWAY!", "Truce! Everyone to their job!")
 			for p: Player in players.values():
@@ -372,7 +503,7 @@ func _tick_clock() -> void:
 # ============================================================== main loop
 
 func _physics_process(delta: float) -> void:
-	if phase in [Phase.COUNTDOWN, Phase.WAR, Phase.WHISTLE, Phase.CLEANUP]:
+	if phase in [Phase.COUNTDOWN, Phase.WAR, Phase.WHISTLE, Phase.CLEANUP] and not warmup:
 		time_left = maxf(0.0, time_left - delta)
 	if phase == Phase.WAR:
 		level.room.clock_progress = 1.0 - time_left / maxf(war_time, 1.0)
@@ -398,7 +529,9 @@ func _physics_process(delta: float) -> void:
 			_tick_gags(delta)
 			_tick_pickups(delta)
 			_tick_navigation(delta)
-			if time_left <= 0.0 or scores.max() >= capture_limit:
+			if warmup:
+				_tick_warmup(delta)
+			elif time_left <= 0.0 or (capture_limit > 0 and scores.max() >= capture_limit):
 				_end_war()
 		Phase.WHISTLE:
 			if time_left <= 0.0:
@@ -566,7 +699,11 @@ func _tick_remote(delta: float) -> void:
 			if phase == Phase.WAR and level.bases[c.team].contains(c.position):
 				r.hold += delta
 				if r.hold >= CHANNEL_TIME:
-					_score(c)
+					if warmup:
+						_reset_remote()
+						_cl_event.rpc("%s changed the channel! In the real match, that scores." % c.display_name, Roster.TEAM_COLORS[c.team])
+					else:
+						_score(c)
 					return
 			else:
 				r.hold = 0.0
@@ -582,7 +719,7 @@ func _tick_remote(delta: float) -> void:
 				r.timer = 0.0
 			else:
 				r.position = next
-			r.z = sin(clampf(r.timer / THROW_TIME, 0.0, 1.0) * PI) * 14.0
+			r.z = sin(clampf(r.timer / maxf(r.flight, 0.01), 0.0, 1.0) * PI) * 14.0
 			if r.timer <= 0.0:
 				r.z = 0.0
 				_drop_remote(r.position)
@@ -662,15 +799,16 @@ func _cl_remote(state: int, carrier: int, pos: Vector2, pz: float, hold: float) 
 		p.carrying = state == TVRemote.State.CARRIED and p.pid == carrier
 
 
-func request_throw(p: Player, dir: Vector2) -> void:
+## Throws the remote `dist` floor px (to a teammate, see Player.pass_target).
+func request_throw(p: Player, dir: Vector2, dist: float = THROW_RANGE) -> void:
 	if multiplayer.is_server():
-		_srv_throw(p.pid, dir)
+		_srv_throw(p.pid, dir, dist)
 	else:
-		_srv_throw.rpc_id(1, p.pid, dir)
+		_srv_throw.rpc_id(1, p.pid, dir, dist)
 
 
 @rpc("any_peer", "call_remote", "reliable")
-func _srv_throw(pid: int, dir: Vector2) -> void:
+func _srv_throw(pid: int, dir: Vector2, dist: float) -> void:
 	var p: Player = players.get(pid)
 	if p == null or p.get_multiplayer_authority() != _sender():
 		return
@@ -680,7 +818,8 @@ func _srv_throw(pid: int, dir: Vector2) -> void:
 	remote.carrier_pid = 0
 	remote.thrower = pid
 	remote.grace = 0.35
-	remote.timer = THROW_TIME
+	remote.timer = clampf(dist, 16.0, THROW_RANGE) / THROW_SPEED
+	remote.flight = remote.timer
 	remote.position = p.position
 	remote.vel = Iso.to_screen((dir if dir.length() > 0.1 else p.facing).normalized() * THROW_SPEED)
 
@@ -753,7 +892,9 @@ func _apply_hit(a: Player, t: Player, spec: Dictionary, d: Vector2, knock_scale:
 		t.shield -= soak
 		damage -= soak
 		_cl_shield.rpc(t.pid, t.shield)
-	t.hp = maxi(0, t.hp - roundi(damage))
+	# (Nobody gets knocked out in the warm-up.)
+	t.hp = maxi(1 if warmup else 0, t.hp - roundi(damage))
+	_hurt_at[t.pid] = work_clock
 	if effect == "drain" and not a.is_ko:
 		var healed := mini(a.max_hp, a.hp + roundi(damage * float(spec.get("effect_value", 0.5))))
 		if healed > a.hp:
@@ -1235,6 +1376,12 @@ func in_reach(p: Player, job: Object) -> bool:
 	if job is MessItem:
 		return Iso.fdist(p.position, job.position) <= FIX_RADIUS
 	return (job as Furniture).distance_to(p.position) <= FIX_RADIUS
+
+
+## The job someone holding interact right here would work on (or null): for
+## the "hold" prompt over their head.
+func job_here(p: Player) -> Object:
+	return _job_for(p)
 
 
 ## Does this owner clean their chore their own way (driving over it, running
@@ -2095,7 +2242,9 @@ func _tick_pickups(delta: float) -> void:
 	_pickup_t = randf_range(every.x, every.y)
 	if pickups.size() >= (Pickups.WAR_MAX if war else Pickups.CLEANUP_MAX):
 		return
-	var kind := Pickups.roll(Pickups.WAR_ODDS if war else Pickups.CLEANUP_ODDS)
+	var kind := Pickups.roll(Pickups.allowed(Pickups.WAR_ODDS if war else Pickups.CLEANUP_ODDS, Net.powerups))
+	if kind < 0:
+		return  # the host switched off every kind for this part of the match
 	var arg := ""
 	var at := Vector2.INF
 	match kind:
@@ -2106,6 +2255,8 @@ func _tick_pickups(delta: float) -> void:
 			# For the chore with the most left to do, near one of its jobs.
 			var job = _tool_job()
 			if job == null:
+				if not Pickups.Kind.SKATES in Net.powerups:
+					return
 				kind = Pickups.Kind.SKATES
 			else:
 				arg = str(chore_of(job))

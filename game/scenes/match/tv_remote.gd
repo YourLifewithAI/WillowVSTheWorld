@@ -13,6 +13,8 @@ var home := Vector2.ZERO
 # Host-side bookkeeping.
 var vel := Vector2.ZERO
 var timer := 0.0
+## How long this throw flies for (seconds).
+var flight := 0.0
 var thrower := 0
 var grace := 0.0
 var hold := 0.0

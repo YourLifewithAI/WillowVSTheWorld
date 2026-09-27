@@ -1,6 +1,6 @@
 # Willow VS The World: Game Design Document
 
-*Living document. Version 0.5: four homes, over-the-top weapons, gags, stealth, furniture you can destroy, and sound.*
+*Living document. Version 0.6: four homes, over-the-top weapons, supers, stealth, furniture you can destroy, sound, hold-to-aim, and a warm-up before every match.*
 
 ## The pitch
 
@@ -35,8 +35,9 @@ place too hard and *everyone* is grounded.
 
 | Phase | Default length | What happens |
 |---|---|---|
+| Warm-up | until everyone's ready | Only when the match is started from the lobby (see *The warm-up*). |
 | Countdown | 3 s | "The parents just left..." Everyone at their base. |
-| **War** | 3:00, or first to **5** captures | Capture the remote. KOs, explosions, wrecked furniture. |
+| **War** | 3:00 on the clock | Capture the remote as often as you can: the team with more captures when time runs out wins. KOs, explosions, wrecked furniture. |
 | Whistle | 3 s | "CAR IN THE DRIVEWAY!" Everyone freezes; KO'd players wake up. |
 | **Cleanup** | 0:45-1:03 (per home) | Everyone to their job: each character cleans up one kind of mess. |
 | Results | until the host continues | The parents' verdict, the TV, the awards. |
@@ -49,9 +50,12 @@ All of these are `@export` knobs on `Match` (`game/scenes/match/match.gd`).
 - **Pick it up** by touching it. The carrier is slower (per-character `carry_speed`)
   and **can't attack, use specials, or dash**. That makes the carrier
   vulnerable on purpose, so escorting and passing matter.
-- **Pass it:** press *interact* while carrying to throw it. Teammates (or
-  enemies!) can catch it mid-air.
-- **Score:** stand on your team's rug holding the remote for **2 seconds**
+- **Pass it:** tap *interact* while carrying to throw it to the teammate roughly
+  the way you're facing (within 45 degrees and 140 px, with no wall in between; it
+  goes to where they're running). Hold *interact* to plant and aim (25 degrees), then
+  let go. Nobody that way: it flies its full 140 px. Teammates (or enemies!) can catch
+  it mid-air.
+- **Score:** stand on your team's rug holding the remote for **3 seconds**
   ("changing the channel"). Taking any hit resets the timer. A score sends the
   remote back to the middle and switches the TV to your team's show.
 - **Drops:** a KO'd carrier drops the remote. If nobody touches it for 8 seconds
@@ -67,10 +71,10 @@ same four jobs, filled by very different characters.
 
 | Input | What it does |
 |---|---|
-| **Attack** | Fire (or swing) your character's weapon. Holding it keeps automatic weapons going. |
-| **Up close** (interact) | Your close-up move (see *Close-up moves* below). While carrying the remote, the same button throws it. |
+| **Attack** | Fire (or swing) your character's weapon. Tap to fire; hold to plant and aim (see *Aiming*). Holding it keeps automatic weapons going. |
+| **Up close** (interact) | Your close-up move (see *Close-up moves* below). While carrying the remote, the same button passes it. |
 | **Special** | Your signature move, on a cooldown (3.5 to 9 s). |
-| **Gag** | Your big, silly, charge-up move (see *Gags* below). |
+| **Super** | Your big, silly, charge-up move (see *Supers* below). |
 | **Dash** | A quick burst on a 1.1 s cooldown. Some characters' dashes are shorter. |
 
 - **Weapons are ridiculous on purpose:** a laser pointer blaster, a catnip bazooka, a
@@ -108,14 +112,42 @@ your weapon for 0.25 s, so it's a choice, not a free extra attack.
 Numbers live in `"melee"` in `game/scripts/core/roster.gd`; the effects are
 `lunge`, `drain`, `steal`, `shove_items`, `knockup` and `pull`.
 
-### Gags
+### Aiming
 
-Every character has a **gag**: a big, silly move themed on what they are (cats get
-litter, the dog gets a bone, the Roomba sucks) that also plays to their strengths. The
-gag meter fills slowly during the war and faster as you deal damage (about 55 seconds
-from empty, or ~330 damage). Press **I** (or **Q**, or the right bumper).
+Playtesting showed that aiming wherever you last moved was clunky, especially at
+diagonals on a keyboard. Aiming now works like Boomerang Fu (see `Player` in
+`game/scenes/match/player.gd`):
 
-| Who | Gag | The joke | Why it's a bonus for them |
+- **Tap** attack: fire the way you're facing. It fires when you let go, which is
+  about a twentieth of a second after the press.
+- **Hold** attack for 0.15 s: you plant your feet, the stick (or WASD) only turns
+  you, and a dotted line shows where the shot will go. Let go to fire. A shot let go
+  of while still reloading goes off as soon as it can (within 0.3 s). Automatic
+  weapons fire from the press and keep firing while held (and plant you too).
+- **A second stick** (a Pro Controller, two Joy-Cons held together) or **the mouse**
+  (for whoever plays on the keyboard; left click fires, right click is the special)
+  aims while the first stick moves, and fires on the press, twin-stick style. Dashes
+  go where you steer, not where you aim.
+- **Aim assist** nudges shots, projectile specials, close-up moves and the Litter
+  Bomb and Flock Call onto an enemy just off the line. The cone is 25 degrees aiming
+  with the moving stick or keys (8 directions are 45 degrees apart, so every enemy is
+  within reach of one of them), 12 degrees with a second stick, 5 with the mouse.
+  It only picks enemies your team can see, in range, with no wall in the way.
+- **Keyboard diagonals:** letting go of W and D a frame or two apart used to leave
+  you facing along the last key. A diagonal now sticks for 0.1 s after one of its
+  keys comes up.
+- A notch on your ring always shows which way you're facing.
+- Bots aim the way they always have (they fire on the press, and need no assist).
+
+### Supers
+
+Every character has a **super** (called a *gag* in the code): a big, silly move themed
+on what they are (cats get litter, the dog gets a bone, the Roomba sucks) that also
+plays to their strengths. The super meter fills slowly during the war and faster as
+you deal damage (about 55 seconds from empty, or ~330 damage). Press **I** (or **Q**,
+SL/SR on a Joy-Con, or a shoulder button).
+
+| Who | Super | The joke | Why it's a bonus for them |
 |---|---|---|---|
 | Cats (Willow, Biscuit) | **Litter Bomb** | Lob a whole litter box; it bursts into a dust cloud and litters the floor | Cats inside their own cloud stay invisible *even while running*; enemies wade through it at 60% speed. Biscuit's box is chonkier (bigger cloud). |
 | Pepper | **Big Bone** | The gatling is swapped for a giant bone for 8 s; every whack is a home run | Huge knockback, wrecks furniture, and a dog never lets go of a bone: no butterfingers while holding it |
@@ -145,9 +177,11 @@ The pets are sneaky, the robots have sensors.
   teammates look ghostly, revealed enemies are drawn normally. Bots play by the same
   rule: they can't target what their team can't see.
 
-### Pickups
+### Powerups
 
-Every 14-20 s a bubble pops up somewhere open on the floor (never on a base or
+The host picks which powerups can turn up, in the lobby's **Powerups** menu (the
+top button on a controller), which lists each one with what it does. They're all on
+unless switched off. Every 14-20 s a bubble pops up somewhere open on the floor (never on a base or
 the rug, at most three at once, gone after 20 s). Whoever walks over it first
 gets what's inside (numbers in `game/scripts/core/pickups.gd`):
 
@@ -156,7 +190,7 @@ gets what's inside (numbers in `game/scripts/core/pickups.gd`):
 | **The Zoomies** (lightning bolt) | 40% faster for 8 s |
 | **Bubble Wrap** | soaks up the next 40 damage (for up to 12 s) |
 | **A Snack** (fish cracker) | +50 health |
-| **A Treat** (star) | your gag is ready right now |
+| **A Treat** (star) | your super is ready right now |
 | **Someone else's weapon** | 12 s with another character's laser, bazooka, gatling, dust cannon, toaster or wrecking ball (the host checks the hits like any other; nobody picks up their own) |
 
 Bots grab anything good that turns up near them, unless someone's on top of them.
@@ -309,7 +343,7 @@ clear strength and one clear weakness. Numbers live in `game/scripts/core/roster
 | **The Claw**, ceiling gantry | Wrecker | 75 | **Wrecking Ball**: huge swing, flattens furniture | **Claw Drop**: telegraphed slam, long stun | **Ceiling Rider**: glides over furniture | **Long Reboot**: +3 s before respawning |
 | **Bass**, smart speaker | Support | 100 | **Subwoofer Cannon**: bass waves that pass through enemies *and* furniture | **Hype Track**: heals and speeds up nearby allies | **Cleaning Playlist**: everyone nearby cleans up 20% faster | **No Legs**: hops, so its dash is tiny |
 
-Each character's **gag** is listed in *Gags* above.
+Each character's **super** is listed in *Supers* above.
 
 Ideas waiting in the wings: a hamster in a ball, a goldfish in a rolling bowl,
 a smart fridge (immobile turret?), a drone, a robot lawnmower that only works
@@ -324,9 +358,9 @@ the runs are, where the chokepoints are, how much stuff there is to break.
 | Home | Size | Best for | What makes it different |
 |---|---|---|---|
 | **The Family Home** (default) | 18x18, four rooms | 4-8 | Dining room, kitchen, den and living room in a ring (mirror-symmetric). The pets' base is in the kitchen, the robots' in the den, each behind a door with a second way out through the dining room. The remote sits in the living room, the front-most room, so no wall hides the fight. War 3:00, cleanup 0:58. |
-| **Suburban House** | 22x14, five rooms | 6-8 | A long ranch house: kitchen, dining room and mudroom (pets), living room, garage workshop (robots) and den. Four doors into the living room, so eight players never jam one choke. Long runs; passing matters. War 3:30, cleanup 1:03. |
+| **Suburban House** | 22x14, five rooms | 6-8 | A long ranch house: kitchen, dining room and mudroom (pets), living room, garage workshop (robots) and den. Four doors into the living room, so eight players never jam one choke. Long runs; passing matters. Cleanup 1:03. |
 | **The Farmhouse** | 17x17, four rooms and a porch | 4-6 | Pantry, mudroom (pets), workshop (robots) and a farm kitchen around an old stone chimney that never breaks. A porch runs round the outside, so every base has three ways out. Cleanup 0:54. |
-| **Studio Apartment** | 12x12, one room | 2-4 | Bed, desk and kitchenette crammed together. Short runs, constant brawling, a milk jug that has escaped the fridge. War 2:30, cleanup 0:45. |
+| **Studio Apartment** | 12x12, one room | 2-4 | Bed, desk and kitchenette crammed together. Short runs, constant brawling, a milk jug that has escaped the fridge. Cleanup 0:45. |
 | **The Living Room (classic)** | 16x16, one room | 4-6 | The original: open, symmetric, easy to read. No walls, so it's the place to learn. Cleanup 0:50. |
 
 **The whole house fits on one screen.** The game draws at 640x360 and scales by
@@ -349,7 +383,7 @@ During cleanup every inside wall is see-through, so no mess is ever hidden.
 - **One hit, one panel:** a blast or swing damages only the nearest panel, so a
   hole is exactly as big as what was really broken. A swing that lands on someone
   doesn't dent the wall behind them.
-- **What they stop:** shots (except Bass's waves), blasts, swings, gags that reach
+- **What they stop:** shots (except Bass's waves), blasts, swings, supers that reach
   across the floor (Mega Suck, the Claw Machine, the Flock Call), a thrown remote,
   and picking the remote up. Lobbed shells sail over while they're higher than the
   wall (as drawn) and burst on it when they're lower.
@@ -401,15 +435,24 @@ smart-home-of-the-future where the robots have home advantage.
 
 ## Controls
 
-| Action | Keyboard | Joy-Con, held sideways | Other controllers |
+| Action | Keyboard and mouse | Joy-Con, held sideways | Other controllers |
 |---|---|---|---|
 | Move | WASD / arrow keys | stick | left stick / D-pad |
-| Attack | J or Z | left button | west button |
-| Special | K or X | top button | north button |
-| Gag | I or Q | SL or SR | shoulder buttons / triggers |
+| Attack (tap, or hold to aim) | J or Z, left click | left button | west button |
+| Aim while moving | the mouse | | right stick |
+| Special | K or X, right click | top button | north button |
+| Super | I or Q | SL or SR | shoulder buttons / triggers |
 | Dash | Space, L or Shift | bottom button | south button |
-| Interact: throw remote, hold to tidy | E or C | right button | east button |
-| Menu | Esc | + or - | Start / Back |
+| Interact: pass the remote, hold to tidy | E or C | right button | east button |
+| Menu (the warm-up: I'm ready) | Esc (Enter) | + or - | Start / Back |
+
+On screen, buttons are drawn rather than named (`Glyphs`, `HintLine`): a sideways
+Joy-Con's four buttons are printed with arrows on one side and letters on the other,
+so a button is shown as a diamond of four dots with that one lit. The shoulder
+buttons are an "SL SR" pill, + / - a round plus, the keyboard a keycap. Hints follow
+the seat's controller; someone playing alone without joining gets whatever they last
+touched. The bottom line of the screen, each card, and a prompt next to your character
+("hold" by a job you could tidy, "pass" when you carry the remote) all use them.
 
 Keys can be remapped in Godot (*Project > Project Settings > Input Map*). Those
 actions are keyboard-only; controllers are read one by one by the `Seats` autoload
@@ -458,11 +501,25 @@ Several people on one computer, one screen, a controller each.
   character stands still instead) and that seat steers it; anyone's + or - closes it.
   From a controller the menu offers only "Keep playing" and "Back to lobby": ending the
   session is for the keyboard or mouse. In the lobby, + or - starts a 3-second countdown
-  that another press calls off. The results card ignores everything for 3 s, then + or -
+  that another press calls off, and the top button opens the powerups menu (stick up
+  and down picks, the bottom button switches). If a controller is connected but
+  nobody has joined with it (while others have), starting says so first; starting again
+  within 5 s goes ahead. The results card ignores everything for 3 s, then + or -
   means rematch. On the main menu, any controller button means Practice.
 - **Input edges.** Quick taps are latched as events arrive, and a seat that hasn't been
   read for a tick (paused, captured, just joined) starts from what's already held, so
   resuming or joining never fires a stray dash.
+- **The warm-up.** A match started from the lobby opens with a warm-up (`Match.warmup`):
+  the war, but with the clock stopped, the bots standing still as practice dummies,
+  nobody knocked out (health stops at 1, and heals back 2 s after the last hit), the
+  remote not scoring, supers recharging in 5 s, and one of each switched-on war powerup
+  lying around. A checklist under the scoreboard (`WarmupPanel`) ticks off each move
+  each person on this screen tries (move, fire, hold to aim, special, up close, dash,
+  super, pass). Joining stays open, so a Joy-Con that wakes up late can still join with
+  SL + SR: the warm-up reloads with them in it. + or - (Enter on the keyboard) says
+  you're ready (press again to take it back); once every person is, the host starts a
+  fresh match. Esc > *Start the match* skips it, rematches don't have one, and
+  `--warmup=0` turns it off.
 - **Not yet:** guests on client machines (only the host's screen can share), rumble,
   a pausable clock (the satellite scan and the ambush window run on wall-clock time).
 
@@ -505,7 +562,7 @@ today, but none of it has been tuned by ear against real play yet.
 | Verdict | A fanfare (spotless), a happy "ok!" (fine) or a sad trombone (grounded), then the menu music returns |
 | Scoring | TV static, then a fanfare |
 | Changing the channel | A rising blip every quarter of the 2-second hold |
-| Weapons, specials, gags | One sound each: *pew* laser, catnip *fwoomp*, tennis-ball *thock*, egg whistle and *splat*, dust *pff*, toaster spring and *ding*, wrecking-ball whoosh, subwoofer *womp*; bark, feathers, suction, rocket fist, belly-flop *boing* and landing *thud*, claw servo and *clank*, hype arpeggio; litter *poof*, "ta-da!" for the Big Bone, a flock of tweets, a 3-second vacuum roar, satellite lock-on beeps and beam, the claw-machine jingle, a disco groove |
+| Weapons, specials, supers | One sound each: *pew* laser, catnip *fwoomp*, tennis-ball *thock*, egg whistle and *splat*, dust *pff*, toaster spring and *ding*, wrecking-ball whoosh, subwoofer *womp*; bark, feathers, suction, rocket fist, belly-flop *boing* and landing *thud*, claw servo and *clank*, hype arpeggio; litter *poof*, "ta-da!" for the Big Bone, a flock of tweets, a 3-second vacuum roar, satellite lock-on beeps and beam, the claw-machine jingle, a disco groove |
 | Getting hit | *Bop* for small hits, *BONK* for 20+ damage, a sting on ambushes, a spring *boing* when Zoomba flips |
 | KOs | Each character has a voice: meow (pitched up for Willow, down for Biscuit), yelp, tweet, robot power-down, vacuum spin-down, claw servo droop, and a tape-stop for Bass |
 | Picking a character | Their happy hello: meow, *woof woof*, tweet, beep-boop, motor rev, servo whirr, bass drop + chime |
@@ -589,9 +646,19 @@ tools/smoke_test.sh             headless end-to-end tests
 | Chores: owners, rates, job times and weights | `Chores` (`game/scripts/core/chores.gd`) | see *Phase 2* |
 | Heavy threshold | `MessItem` | 200 force |
 
-**Playtest notes so far (bots only):** a 3v3 bot war reaches 5 captures in
-~60-100 s with 15-40 KOs. For cleanup calibration see *Phase 2*; the numbers
-need tuning against **human** playtests.
+**Playtest notes:** the first couch playtest (Joy-Cons, a laptop cast to a TV) found:
+- the war far too short: it used to end at the first team to 5 captures, which took
+  30-100 s. It now always runs its full 3 minutes, and captures take 3 s instead of 2;
+- aiming clunky (you aimed wherever you last moved; diagonals were hard on a
+  keyboard): now hold to aim, a second stick or the mouse, aim assist (see *Aiming*);
+- "Left / Top / Right" hints unclear on a Joy-Con, and no telling which button tidies:
+  now pictures of the buttons, and a "hold" prompt next to you by a job;
+- nobody knew the remote could be thrown: now "pass" next to the carrier, and passes
+  that go to a teammate;
+- "gags" a strange word: now supers; powerups needed explaining: now a lobby menu;
+- Joy-Cons waking up after the bots had already started: now a warm-up first.
+For cleanup calibration see *Phase 2*; the numbers need tuning against **human**
+playtests.
 
 ## Roadmap
 
@@ -602,7 +669,7 @@ need tuning against **human** playtests.
 | **M2: Real art** | Animated character sprites, furniture sprites, UI art, a pixel font, a title screen. |
 | **M3: Content** | More homes (see the list above), a backyard, 2 more characters per side, home events (the doorbell, a delivery drone, the cat flap, the smart home's lights turning off). |
 | **M4: Online** | Internet play without port forwarding (relay or Steam/Epic networking), invite codes, reconnects, lag compensation for hits. |
-| **M5: Couch mode** | ~~Several players on one screen with gamepads~~ (in: join from the lobby, split Joy-Con pairs, per-seat cards; needs real-hardware playtests). Next: guests on client machines, per-seat rumble, "ready" checks. |
+| **M5: Couch mode** | ~~Several players on one screen with gamepads~~ (in: join from the lobby, split Joy-Con pairs, per-seat cards; needs real-hardware playtests). ~~"Ready" checks~~ (the warm-up). Next: guests on client machines, per-seat rumble. |
 | **M6: Ship** | Steam page, demo, festival builds. |
 
 ## Open questions

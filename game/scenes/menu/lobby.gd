@@ -2,10 +2,10 @@ extends Control
 ## Pick your side, pick your character, wait for friends, start.
 ##
 ## Friends on the same screen join on their own controller (see Seats for the
-## gestures). Each seat then flips through the characters with its stick, and
-## anyone's + or - starts a 3-second countdown (+ or - again cancels it).
-## Controllers never move the menu's focus; the keyboard and mouse work the
-## menu as usual.
+## gestures). Each seat then flips through the characters with its stick, the
+## top button opens the powerups menu (see PowerupsPanel), and anyone's + or -
+## starts a 3-second countdown (+ or - again cancels it). Controllers never
+## move the menu's focus; the keyboard and mouse work the menu as usual.
 
 const COUNTDOWN := 3.0
 
@@ -21,6 +21,12 @@ var _badges: Dictionary = {}  # character id -> HBoxContainer of seat tags
 var _notice: Label
 var _free: Label
 var _countdown := -1.0
+var _powerups_button: Button
+var _powerups: PowerupsPanel
+## Starting while a controller is connected but nobody's joined with it asks
+## first: pressing start again within this long goes ahead anyway.
+var _confirm_t := 0.0
+const CONFIRM_TIME := 5.0
 
 
 func _ready() -> void:
@@ -39,13 +45,14 @@ func _exit_tree() -> void:
 
 
 func _process(delta: float) -> void:
+	_confirm_t = maxf(0.0, _confirm_t - delta)
 	if _countdown >= 0.0:
 		var before := ceili(_countdown)
 		_countdown -= delta
 		if _countdown <= 0.0:
 			_countdown = -1.0
 			if Net.can_start():
-				Net.start_match()
+				Net.start_match(Net.wants_warmup())
 			return
 		if ceili(_countdown) != before:
 			Audio.play("tick")
@@ -56,14 +63,25 @@ func _process(delta: float) -> void:
 		if not st.has_controller() and not (st.device == Seats.KEYBOARD and st.index != 0):
 			continue
 		var n := Seats.nav(st.index)
+		if is_instance_valid(_powerups):
+			# The powerups menu is open: it's for whoever opened it.
+			if st.index == _powerups.seat:
+				_powerups.nav_input(n)
+			continue
+		if n["alt"]:
+			_open_powerups(st.index)
+			continue
 		if n["x"] != 0:
 			Seats.cycle_character(st.index, n["x"])
 			_show_detail(Seats.char_of(st.index))
 		if n["menu"]:
 			_try_start()
 	var free := Seats.free_controllers()
-	_free.text = "" if free.is_empty() else "Connected but not playing yet: " + ", ".join(free)
-	_free.visible = not free.is_empty()
+	if Seats.solo():
+		_free.text = "Playing alone: the keyboard and every controller move you." if not free.is_empty() else ""
+	else:
+		_free.text = "" if free.is_empty() else "Connected but not playing yet: %s. Press SL + SR on it to join!" % ", ".join(free)
+	_free.visible = _free.text != ""
 
 
 ## A controller's + or -: start the countdown, or call it off.
@@ -73,12 +91,41 @@ func _try_start() -> void:
 	if _countdown >= 0.0:
 		_countdown = -1.0
 		_on_notice("Waiting. Press + or - when everyone's ready.", UiTheme.COCOA)
+	elif Net.can_start() and _someone_left_out():
+		pass
 	elif Net.can_start():
 		Audio.play("start")
 		_countdown = COUNTDOWN
 		_on_notice("Starting in 3...  (+ or - to wait)", Color("3a9f6a"))
 	else:
 		_on_notice("Each side needs at least one player: pick someone from the other team, or add a bot.", Color("e05a5a"))
+
+
+## A controller is connected but nobody has joined with it (and people have
+## joined with others, so it isn't moving anyone): say so the first time, and
+## go ahead if start is pressed again soon after.
+func _someone_left_out() -> bool:
+	if Seats.solo() or Seats.free_controllers().is_empty() or _confirm_t > 0.0:
+		return false
+	_confirm_t = CONFIRM_TIME
+	Audio.play("select")
+	_on_notice("%s is connected but not playing. Press SL + SR on it to join, or start again to go without it."
+		% Seats.free_controllers()[0], Color("e07a2a"))
+	return true
+
+
+## The powerups menu, for a controller's seat (or -1: the mouse and keyboard).
+func _open_powerups(for_seat: int) -> void:
+	if is_instance_valid(_powerups):
+		return
+	_countdown = -1.0
+	_powerups = PowerupsPanel.new()
+	_powerups.seat = for_seat
+	_powerups.closed.connect(func() -> void:
+		if _char_buttons.has(Net.local_char) and Seats.keyboard_seat() <= 0:
+			_char_buttons[Net.local_char].grab_focus())
+	add_child(_powerups)
+	Audio.play("select", -4.0)
 
 
 func _on_notice(text: String, color: Color) -> void:
@@ -151,6 +198,10 @@ func _build() -> void:
 		clear.pressed.connect(Net.remove_bots)
 		bot_row.add_child(clear)
 		lcol.add_child(bot_row)
+	_powerups_button = Button.new()
+	_powerups_button.add_theme_font_size_override("font_size", 8)
+	_powerups_button.pressed.connect(_open_powerups.bind(-1))
+	lcol.add_child(_powerups_button)
 	var btn_row := HBoxContainer.new()
 	lcol.add_child(btn_row)
 	var leave := Button.new()
@@ -163,8 +214,10 @@ func _build() -> void:
 		_start.text = "Start! (parents leave)"
 		_start.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		_start.pressed.connect(func() -> void:
+			if _someone_left_out():
+				return
 			Audio.play("start")
-			Net.start_match())
+			Net.start_match(Net.wants_warmup()))
 		btn_row.add_child(_start)
 
 	# Right: pick a character.
@@ -213,11 +266,14 @@ func _build() -> void:
 			_char_buttons[id] = b
 	if Net.is_host():
 		var join := UiTheme.label("Join: hold a Joy-Con sideways and press SL + SR (two held as one, or a controller: L + R). "
-			+ "Stick: change character.  + or -: start.  Your number is on screen (not the Joy-Con's lights).", 8, UiTheme.COCOA)
+			+ "Stick: change character.  Top button: powerups.  + or -: start (you get a warm-up first).  "
+			+ "Your number is on screen (not the Joy-Con's lights).", 8, UiTheme.COCOA)
 		join.autowrap_mode = TextServer.AUTOWRAP_WORD
 		join.custom_minimum_size.x = 360
 		rcol.add_child(join)
-	_free = UiTheme.label("", 7, UiTheme.COCOA)
+	_free = UiTheme.label("", 8, Color("c0561c"))
+	_free.autowrap_mode = TextServer.AUTOWRAP_WORD
+	_free.custom_minimum_size.x = 360
 	rcol.add_child(_free)
 	_detail = UiTheme.label("", 8)
 	_detail.max_lines_visible = 7
@@ -258,7 +314,7 @@ func _show_detail(id: String) -> void:
 	var chore := Chores.owned_by(id)
 	var walls := " (Big Bone)" if id == "pepper" else ""
 	var breaker := "" if not (id in ["biscuit", "butler", "claw", "pepper"]) else "   ·   Breaks walls%s" % walls
-	_detail.text = "%s the %s (%s): %s\nWeapon: %s   ·   Up close: %s   ·   Special: %s   ·   HP %d   ·   Speed %d%s\nGag: %s. %s\n+ %s\n- %s\nCleanup: %s %s." % [
+	_detail.text = "%s the %s (%s): %s\nWeapon: %s   ·   Up close: %s   ·   Special: %s   ·   HP %d   ·   Speed %d%s\nSuper: %s. %s\n+ %s\n- %s\nCleanup: %s %s." % [
 		c["name"], c["species"], c["role"], c["blurb"],
 		c["weapon"]["name"], m["name"], sp["name"], c["hp"], c["speed"], breaker,
 		g["name"], g["blurb"], c["strength"], c["weakness"], Chores.VERB.get(chore, ""),
@@ -329,6 +385,10 @@ func _refresh() -> void:
 			var picked := Seats.char_of(st.index)
 			if _badges.has(picked):
 				_badges[picked].add_child(UiTheme.label(Seats.tag(st.index), 8, Seats.color(st.index), true))
+	_powerups_button.text = "Powerups: %d of %d on%s" % [Net.powerups.size(), Pickups.MENU.size(),
+		"  (change)" if Net.is_host() else "  (see)"]
+	if is_instance_valid(_powerups):
+		_powerups.refresh()
 	var map: Dictionary = Maps.get_map(Net.map_id)
 	if _map_pick:
 		_map_pick.select(Maps.ORDER.find(Net.map_id))

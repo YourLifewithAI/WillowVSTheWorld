@@ -7,9 +7,10 @@ pulls back into the driveway.
 
 ![Pets and robots fighting over the remote in the living room](docs/images/war.gif)
 
-**Phase 1: War for the remote.** Team capture-the-flag with over-the-top weapons.
-Grab the remote, carry it to your team's rug, and hold it there for two seconds to
-change the channel. Blast anyone who tries, and the furniture too. KOs are just naps.
+**Phase 1: War for the remote.** Team capture-the-flag with over-the-top weapons,
+for three minutes. Grab the remote, carry it to your team's rug (or pass it to a
+teammate), and hold it there for three seconds to change the channel; the team that
+changes it most wins. Blast anyone who tries, and the furniture too. KOs are just naps.
 
 **Phase 2: Cover it up.** *CAR IN THE DRIVEWAY!* Truce. Everyone, both teams,
 cleans up, and everyone does it differently: Zoomba vacuums, Willow bats books and
@@ -20,10 +21,11 @@ speed, so after a big war the house only gets spotless if everyone plays to thei
 strengths. The war's winners only get to watch their show if the house passes
 inspection. Otherwise everybody is grounded.
 
-Things pop up on the floor all the while: in the war, power-ups (the zoomies,
-bubble wrap, snacks, treats that charge your gag) and other characters' weapons;
-in the cleanup, turbo tools that only the chore's owner can pick up, and roller
-skates.
+**Powerups** pop up on the floor all the while: in the war, the zoomies, bubble
+wrap, snacks, treats that charge your super, and other characters' weapons; in the
+cleanup, turbo tools that only the chore's owner can pick up, and roller skates.
+The lobby's **Powerups** menu says what each one does, and the host picks which
+ones can turn up.
 
 | Pick a side | Clean up together |
 |---|---|
@@ -77,10 +79,10 @@ pets are sneaky and chaotic, the robots have sensors and are great at repairs.
 | **The Claw**, ceiling gantry | Wrecking Ball | **Yoink!**: reels you in under the claw | Rides the ceiling; lifts heavy things alone | Long reboot after a KO |
 | **Bass**, smart speaker | Subwoofer Cannon | **Feedback**: a squeal that blasts you away | Cleaning playlist speeds up everyone's cleaning | No legs: tiny dash |
 
-Everyone also has a **gag**: a big, silly, charge-up move themed on what they are,
+Everyone also has a **super**: a big, silly, charge-up move themed on what they are,
 which also plays to their strengths:
 
-| Gag | Who | What happens |
+| Super | Who | What happens |
 |---|---|---|
 | **Litter Bomb** | the cats | A litter box bursts into a dust cloud; cats stay invisible inside it, everyone else is bogged down |
 | **Big Bone** | Pepper | Every whack is a home run, and a dog never drops the remote while holding a bone |
@@ -93,7 +95,7 @@ which also plays to their strengths:
 Furniture has health: the wrecking ball, bazooka and friends reduce couches, tables
 and walls to rubble, which has to be rebuilt before the parents get home.
 
-Everything makes a noise: every weapon, gag and KO (each character has their own
+Everything makes a noise: every weapon, super and KO (each character has their own
 voice), the parents' car pulling away and honking back into the driveway, a ticking
 clock in the last ten seconds, and a chiptune soundtrack for the menus, the war and
 the cleanup. Volume controls are under **Sound** on the title screen and in the
@@ -113,19 +115,30 @@ add or remove them in the lobby.
 
 ### Controls
 
-| | Keyboard | Joy-Con, held sideways | Other controllers |
+| | Keyboard and mouse | Joy-Con, held sideways | Other controllers |
 |---|---|---|---|
 | Move | WASD / arrows | stick | left stick or D-pad |
-| Attack (hold for automatic weapons) | J | left button | left face button (Xbox X, Switch Y) |
-| Special | K | top button | top face button (Xbox Y, Switch X) |
+| Fire: tap it, or **hold to stand still and aim**, then let go | J (or left click) | left button | left face button (Xbox X, Switch Y) |
+| Aim while you move | the mouse | | right stick (Pro Controller, or two Joy-Cons held together) |
+| Special | K (or right click) | top button | top face button (Xbox Y, Switch X) |
 | Dash | Space | bottom button | bottom face button (Xbox A, Switch B) |
-| Up close move / throw the remote / hold to tidy | E | right button | right face button (Xbox B, Switch A) |
-| Gag (when the meter is full) | I or Q | SL or SR | a shoulder button or trigger |
+| Up close move / pass the remote / hold to tidy | E | right button | right face button (Xbox B, Switch A) |
+| Super (when the meter is full) | I or Q | SL or SR | a shoulder button or trigger |
 | Menu (pauses in Practice) | Esc | + or - | Start or Back |
 | Fullscreen on/off | F11 or Alt+Enter | | |
 
 Buttons go by position, not by the letter printed on them, so a Joy-Con works the
-same whichever way round it is.
+same whichever way round it is. The game shows them as pictures: a diamond of four
+dots with the one to press lit up.
+
+- **Aiming:** a tap fires the way you're facing (a notch on your ring shows which
+  way that is), nudged onto an enemy just off to one side. Hold fire to plant your
+  feet: the stick (or WASD) turns you and a dotted line shows where the shot goes;
+  let go to fire. Automatic weapons keep firing while you hold. With a second stick
+  or the mouse you can aim while you run, and fire goes off the moment you press.
+- **Passing the remote:** carrying it, tap the right button to throw it to a teammate
+  roughly the way you're facing (it goes to where they're running), or hold to plant
+  and aim, then let go.
 
 ### Everyone on one screen (Joy-Cons and a TV)
 
@@ -147,9 +160,17 @@ one screen (cast or plug the laptop into the TV).
    P2 blue, P3 yellow, P4 green...) marks their pick on the character list, floats over
    their character's head and labels their card at the bottom of the screen. Ignore the
    lights on the Joy-Con itself.
-4. **Push the stick left or right** to change character. Anyone's **+ or -** starts a
-   3-second countdown (press again to wait). Add bots with the buttons on the left to
-   fill out the teams; if the house is full, bots make room for people.
+4. **Push the stick left or right** to change character. The **top button** opens the
+   powerups menu. Anyone's **+ or -** starts a 3-second countdown (press again to wait).
+   Add bots with the buttons on the left to fill out the teams; if the house is full,
+   bots make room for people. If a controller is connected but nobody has joined with
+   it, starting asks first (start again to go without it).
+5. **The warm-up.** Before the match, everyone gets the house to themselves: the clock
+   is stopped, the bots stand still as practice dummies, nobody gets knocked out, and
+   one of each powerup is lying around. A checklist at the top ticks off every move you
+   try. A Joy-Con that's late to wake up can still join here (SL + SR). When you're done,
+   press **+ or -** (Enter on the keyboard); once everyone's ready, a fresh match starts.
+   (Esc > *Start the match* skips it.)
 
 Good to know:
 - **A left and right Joy-Con count as two players** even though the computer merges
