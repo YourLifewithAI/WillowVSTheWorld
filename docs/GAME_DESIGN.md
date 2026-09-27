@@ -236,8 +236,9 @@ The weights are set so that after a big war each chore is roughly an equal share
 of the house.
 
 **Calibration (bots only, full 3-minute wars, 8 players):** every character
-playing its role ends at 92-100%; one bot ignoring its role 78-94%; nobody
-playing to their strengths 43-52% (grounded on every map). People will be slower
+playing its role ends at 90-100% (spotless); one bot ignoring its role 73-96%
+(spotless about half the time); nobody playing to their strengths 43-52%
+(grounded on every map). People will be slower
 than bots, so the cleanup times (per home, in `game/scripts/core/maps.gd`) need
 tuning against real playtests.
 

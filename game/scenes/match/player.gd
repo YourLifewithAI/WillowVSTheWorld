@@ -1044,7 +1044,9 @@ func _update_pointer(delta: float) -> void:
 		return
 	_pointer_t = 0.25
 	_pointer = arena.pointer_for(self)
-	var done: bool = arena.my_chore(self) != Chores.Chore.NONE and not _pointer.get("own", false)
+	# Done once nothing of this chore is left, not even steps still to come.
+	var mine := arena.my_chore(self)
+	var done: bool = mine != Chores.Chore.NONE and int(arena.chore_totals().get(mine, [0, 0.0])[0]) == 0
 	if done and not _all_done:
 		Fx.text(arena.level.entities, position + Vector2(0, -sprite_height() - 12), "ALL DONE! HELP!", marker_color())
 		Audio.play_at("c_done", arena.level.entities, position)

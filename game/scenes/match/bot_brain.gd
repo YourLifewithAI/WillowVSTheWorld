@@ -345,6 +345,7 @@ var _job = null  # (untyped: floor mess may be freed under it)
 var _job_progress := -1.0
 var _job_stalled := 0.0
 var _job_closest := INF
+var _carry_t := 0.0
 var _replan_t := 0.0
 var _look_t := 0.0
 var _skip: Dictionary = {}  # jobs this bot gave up on -> seconds before it tries again
@@ -360,8 +361,17 @@ func _cleanup(inp: Dictionary, delta: float) -> void:
 		return
 	var held := arena.carried_by(me)
 	if held:
-		inp["move"] = _steer(held.home, delta) * BOT_PACE  # he drops it once he's there
+		# Home (or as close as anyone gets); he drops it in place once he's there.
+		# Stuck for too long? Put it down and leave it for someone else.
+		_carry_t += delta
+		if _carry_t > 8.0:
+			inp["interact"] = true
+			_skip[held] = 10.0
+			_carry_t = 0.0
+			return
+		inp["move"] = _steer(arena.level.walkable(held.home), delta) * BOT_PACE
 		return
+	_carry_t = 0.0
 	for job in _skip.keys():  # (some may be freed by now)
 		_skip[job] -= delta
 		if _skip[job] <= 0.0:

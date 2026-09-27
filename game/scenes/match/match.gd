@@ -32,6 +32,8 @@ const AMBUSH_MULT := 2.0
 const FLIP_KNOCK := 220.0
 ## Most bits of floor mess allowed at once (after that, piles just grow).
 const MAX_DEBRIS := 140
+## ...plus this many more when every pile of that kind of mess is already as big as it gets.
+const MAX_DEBRIS_EXTRA := 40
 ## Floor pixels in one tile.
 const TILE := 22.63
 ## How a bit of floor mess got cleaned (for the effect everyone sees).
@@ -93,6 +95,10 @@ var _prev_pos: Dictionary = {}  # pid -> where they were last tick (drive-overs 
 var _swat_cd: Dictionary = {}  # Willow pid -> seconds until the next swat
 var _thump_cd: Dictionary = {}  # Bass pid -> seconds until the next THUMP
 var _carried: Dictionary = {}  # Pepper pid -> MessItem he's carrying home
+var _knocked_at: Dictionary = {}  # pid -> when the host last knocked them flying
+var _crash_seen: Dictionary = {}  # Vector2i(pid, furniture index) -> when a crash into it was last counted
+var _put_down: Dictionary = {}  # Pepper pid -> [MessItem he just put down, when]
+var _was_holding: Dictionary = {}  # pid -> held interact last tick (a fresh press drops what Pepper carries)
 var _worked: Dictionary = {}  # jobs someone worked last tick
 var _credit: Dictionary = {}  # job -> {pid: work done on it}
 var _chore_log: Dictionary = {}  # chore -> {"done", "owner", "other"} weight cleared
@@ -223,6 +229,7 @@ func _on_seats_changed() -> void:
 		if not is_lost and _stand_ins.has(p):
 			_stand_ins.erase(p)
 			p.brain = SeatInput.new(p.seat)
+			_forget_bot_plans(p)
 		elif is_lost and not _stand_ins.has(p) and not p.brain is BotBrain and not can_pause() \
 				and multiplayer.is_server() and not Net.options.has("autopilot"):
 			_stand_ins[p] = true
@@ -742,6 +749,8 @@ func _apply_hit(a: Player, t: Player, spec: Dictionary, d: Vector2, knock_scale:
 			_drop_remote(t.position)
 			_cl_event.rpc("%s dropped the remote! (butterfingers)" % t.display_name, Roster.TEAM_COLORS[t.team])
 	var hop := float(spec.get("effect_value", 0.0)) if effect == "knockup" else 0.0
+	if knock >= Player.TUMBLE_SPEED:
+		_knocked_at[t.pid] = work_clock  # (so a crash report that follows is believable)
 	_cl_damaged.rpc(t.pid, t.hp, d * knock, stun, ambushed, hop)
 	if t.hp <= 0:
 		_ko(t, a)
@@ -964,8 +973,15 @@ func _drop_pictures(panel: WallPanel, dir: Vector2) -> void:
 func _assign_chores() -> void:
 	specialty.clear()
 	var totals := chore_totals()
+	# People first (in seat order), then bots: if a bot picked the same
+	# character as a person, the bot is the one who takes another chore.
 	var ids: Array = players.keys()
-	ids.sort()
+	ids.sort_custom(func(a: int, b: int) -> bool:
+		var pa: Player = players[a]
+		var pb: Player = players[b]
+		if pa.is_bot != pb.is_bot:
+			return not pa.is_bot
+		return a < b)
 	var taken := {}
 	var spare: Array[int] = []
 	for pid: int in ids:
@@ -1275,6 +1291,7 @@ func _work(job: Object, crew: Array, delta: float, send: bool) -> void:
 		var credit: Dictionary = _credit.get_or_add(job, {})
 		for pid: int in rates:
 			credit[pid] = float(credit.get(pid, 0.0)) + rates[pid] * delta
+			_last_work[pid] = work_clock  # making progress, so not idle
 	if progress >= 1.0:
 		_finish_job(job, owner_on, helpers, send)
 	else:
@@ -1360,6 +1377,12 @@ func _tick_owner_moves(delta: float) -> void:
 	for p: Player in players.values():
 		var from: Vector2 = _prev_pos.get(p.pid, p.position)
 		_prev_pos[p.pid] = p.position
+		var pressed: bool = p.interacting and not _was_holding.get(p.pid, false)
+		_was_holding[p.pid] = p.interacting
+		# Pressing the button with something in your mouth puts it down.
+		if pressed and _carried.has(p.pid):
+			_drop_carried(p.pid, p.position)
+			continue
 		if p.is_ko or p.captured_by != 0:
 			continue
 		var c := my_chore(p)
@@ -1406,16 +1429,22 @@ func _swat(p: Player, from: Vector2, delta: float) -> void:
 func _fetch(p: Player, from: Vector2) -> void:
 	if _carried.has(p.pid):
 		var held: MessItem = _carried[p.pid]
-		if Iso.fdist(p.position, held.home) <= Chores.DELIVER_RADIUS:
+		_last_work[p.pid] = work_clock  # carrying it home is work too
+		# Its place, or as close to it as anyone can get (it may live on top of something).
+		if Iso.fdist(p.position, held.home) <= Chores.DELIVER_RADIUS \
+				or Iso.fdist(p.position, level.walkable(held.home)) <= 6.0:
 			_carried.erase(p.pid)
 			_give_credit(Chores.Chore.FETCH, held.weight(), {p.pid: 1.0})
 			_cl_mess_state.rpc(held.index, false, Vector2.ZERO, 0)
 		return
 	if remote.state == TVRemote.State.CARRIED and remote.carrier_pid == p.pid:
 		return
+	var dropped: Array = _put_down.get(p.pid, [null, -99.0])
 	for item in level.mess_items:
 		if not item.knocked or item.carrier != 0 or item.chore() != Chores.Chore.FETCH:
 			continue
+		if item == dropped[0] and work_clock - float(dropped[1]) < 1.5:
+			continue  # he's only just put it down
 		if Iso.segment_fdist(item.position, from, p.position) > Chores.FETCH_RADIUS or not _reachable(p, item.position):
 			continue
 		if item.stray():
@@ -1432,6 +1461,7 @@ func _fetch(p: Player, from: Vector2) -> void:
 func _drop_carried(pid: int, at: Vector2) -> void:
 	var item: MessItem = _carried[pid]
 	_carried.erase(pid)
+	_put_down[pid] = [item, work_clock]
 	_cl_mess_state.rpc(item.index, true, level.clamp_to_floor(at) - item.home, 0)
 
 
@@ -1560,6 +1590,7 @@ func _tick_gags(delta: float) -> void:
 				_capture(t, z, Player.Capture.SWALLOWED, float(g["swallow_time"]))
 			elif d <= float(g["radius"]) and pulse:
 				var toward := Iso.to_floor(z.position - t.position).normalized()
+				_knocked_at[t.pid] = work_clock
 				_cl_pull.rpc(t.pid, toward * float(g["pull"]))
 	# Captures run out: spit them out / drop them.
 	for tid: int in _captures.keys():
@@ -1703,6 +1734,13 @@ func _srv_furniture_hit(idx: int, amount: float, pid: int, ability: int) -> void
 	if Iso.fdist(by.position, f.position) > 420.0:
 		return
 	if ability < 0:
+		# A crash: only right after the host knocked them flying, right up
+		# against it, and once per piece per moment.
+		var key := Vector2i(pid, idx)
+		if work_clock - float(_knocked_at.get(pid, -99.0)) > 2.0 or f.distance_to(by.position) > Player.BODY_RADIUS + 16.0 \
+				or work_clock - float(_crash_seen.get(key, -99.0)) < 0.3:
+			return
+		_crash_seen[key] = work_clock
 		_scuff(by.position)  # a crash leaves a mark on the floor
 	if f is WallPanel:
 		_drop_pictures(f, Iso.to_floor(f.position - by.position))
@@ -1870,28 +1908,34 @@ func _spawn_debris(kind: String, pos: Vector2) -> void:
 	var spec: Array = Chores.DEBRIS.get(kind, [Chores.Chore.FLOOR, 0.5, 0.4])
 	# A fresh KO pile on top of an old one just makes that one bigger.
 	if kind in ["fur", "bolts"]:
-		var pile := _nearest_debris(pos, Chores.MERGE_RADIUS, kind, -1)
+		var pile := _nearest_debris(pos, Chores.MERGE_RADIUS, kind, -1, true)
 		if pile and _grow(pile):
 			return
 	# The house can only hold so much: after that, the nearest pile of the same
-	# kind of mess grows instead, so it still counts.
+	# kind of mess with room to grow gets bigger instead, so it still counts
+	# (and if there's none, a few more fit in after all).
 	if debris.size() >= MAX_DEBRIS:
-		var pile := _nearest_debris(pos, INF, "", spec[0])
+		var pile := _nearest_debris(pos, INF, "", spec[0], true)
 		if pile:
 			_grow(pile)
-		return
+			return
+		if debris.size() >= MAX_DEBRIS + MAX_DEBRIS_EXTRA:
+			return
 	var id := _next_debris_id
 	_next_debris_id += 1
 	var jitter := Iso.to_screen(Vector2(randf_range(-6, 6), randf_range(-6, 6)))
 	_cl_debris_add.rpc(id, kind, _free_floor_spot(pos + jitter))
 
 
-## The nearest pile of a kind (or of a chore) within `radius`, or null.
-func _nearest_debris(pos: Vector2, radius: float, kind: String, chore: int) -> Debris:
+## The nearest pile of a kind (or of a chore) within `radius` (that can
+## still grow, if `room`), or null.
+func _nearest_debris(pos: Vector2, radius: float, kind: String, chore: int, room: bool = false) -> Debris:
 	var best: Debris = null
 	var best_d := radius
 	for d: Debris in debris.values():
 		if (kind != "" and d.kind != kind) or (chore >= 0 and d.chore != chore):
+			continue
+		if room and d.growth >= Chores.MAX_GROWTH - 0.001:
 			continue
 		var dist := Iso.fdist(d.position, pos)
 		if dist < best_d:
@@ -2024,8 +2068,18 @@ func _on_peer_disconnected(peer: int) -> void:
 func _cl_remove_player(id: int) -> void:
 	if players.has(id):
 		hud.feed("%s went home." % players[id].display_name, Color.WHITE)
+		_forget_bot_plans(players[id])
 		players[id].queue_free()
 		players.erase(id)
+
+
+## A bot stops driving this character (its person is back, or they left):
+## let go of the job it was heading for.
+func _forget_bot_plans(p: Player) -> void:
+	p.focus_job = null
+	for job in claims.keys():
+		if claims[job] == p.pid:
+			claims.erase(job)
 
 
 func summary() -> String:

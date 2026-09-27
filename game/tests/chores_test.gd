@@ -87,10 +87,15 @@ func _run() -> void:
 	check(arena.debris.size() == before + 1 and is_equal_approx(pile.weight, 0.5), "a second KO pile merges into the first")
 	# A crash leaves a scuff (one per spot), and any hit to a wall knocks its picture down.
 	var pepper: Player = cast["pepper"]
-	_place(pepper, 9.0, 13.0)
-	arena._srv_furniture_hit(_furniture("ArmchairPets").index, 18.0, pepper.pid, -1)
-	arena._srv_furniture_hit(_furniture("ArmchairPets").index, 18.0, pepper.pid, -1)
-	check(_count("scuff") == 1, "crashing into furniture leaves one scuff per spot")
+	_place(pepper, 9.4, 14.2)
+	var chair := _furniture("ArmchairPets")
+	arena._srv_furniture_hit(chair.index, 18.0, pepper.pid, -1)
+	check(_count("scuff") == 0 and chair.hp == chair.max_hp, "a crash report nobody was knocked into is ignored")
+	arena._knocked_at[pepper.pid] = arena.work_clock
+	arena._srv_furniture_hit(chair.index, 18.0, pepper.pid, -1)
+	arena._srv_furniture_hit(chair.index, 18.0, pepper.pid, -1)
+	check(_count("scuff") == 1 and chair.hp == chair.max_hp - Player.CRASH_DAMAGE,
+		"crashing into furniture leaves a scuff and a dent (once per crash)")
 	var pic := _item("PicLivingW1")
 	var panel: WallPanel = null
 	for idx: int in arena._pictures:
@@ -142,6 +147,11 @@ func _run() -> void:
 	_refresh()
 	rate = await _rate(butler, crack, 30)
 	check(absf(rate - Chores.OWNER_RATE) < 0.08, "its owner works at full speed (%.2f)" % rate)
+	arena._last_work[butler.pid] = arena.work_clock - Chores.IDLE_TIME - 1.0
+	await frames(2)
+	await _rate(butler, crack, 8)
+	check(butler.pid in arena.chore_owners.get(Chores.Chore.REPAIR, []) and crack.current_chore() == Chores.Chore.REPAIR,
+		"an owner partway through a long job counts as working (before it's finished)")
 	_park(butler)
 	# Zoomba wanders off: floor mess is anyone's, at half speed, with his face faded on it.
 	_refresh()
@@ -240,6 +250,15 @@ func _run() -> void:
 	await frames(5)
 	check(r.carrier_pid != pepper.pid, "...and can't grab the remote while he's carrying something")
 	arena._reset_remote()
+	puppets["pepper"].hold = true
+	await frames(3)
+	puppets["pepper"].hold = false
+	await frames(2)
+	check(lamp.carrier == 0 and lamp.knocked, "...can put it down by pressing the button")
+	await frames(95)  # (he won't grab it straight back)
+	_place_at(pepper, lamp.position)
+	await frames(3)
+	check(lamp.carrier == pepper.pid, "...and pick it up again")
 	_place_at(pepper, lamp.home + Iso.to_screen(Vector2(8, 0)))
 	await frames(3)
 	check(not lamp.knocked and lamp.carrier == 0, "...and drops it in its place")
@@ -273,7 +292,8 @@ func _run() -> void:
 	arena._assign_chores()
 	var chores := willows.map(func(p: Player) -> int: return arena.my_chore(p))
 	check(willows.size() == 2 and Chores.Chore.CLUTTER in chores and Chores.Chore.SOFT in chores,
-		"when two people play Willow, one of them takes the biggest chore nobody owns (%s)" % str(chores))
+		"when two play Willow, one of them takes the biggest chore nobody owns (%s)" % str(chores))
+	check(arena.my_chore(arena.local_player()) == Chores.Chore.CLUTTER, "...and it's the bot, not the person, who switches")
 	_finish()
 
 

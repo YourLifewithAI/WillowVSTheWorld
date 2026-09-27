@@ -28,6 +28,18 @@ const VERB := {
 	Chore.FLOOR: "VACUUM!", Chore.CLUTTER: "HIDE IT!", Chore.STAIN: "THUMP!", Chore.FETCH: "FETCH!",
 	Chore.SOFT: "KNEAD!", Chore.REPAIR: "FIX IT!", Chore.LIFT: "LIFT!", Chore.HIGH: "UP HIGH!",
 }
+## How to do each chore, for the card at the bottom of the screen: holding
+## interact at each job, or (for owners with a move of their own) their way.
+const HOW := {
+	Chore.FLOOR: "Hold {interact} by fur, dust and crumbs", Chore.CLUTTER: "Hold {interact} by books, toys and socks",
+	Chore.STAIN: "Hold {interact} by stains", Chore.FETCH: "Hold {interact} by knocked-over things",
+	Chore.SOFT: "Hold {interact} by cushions and saggy couches", Chore.REPAIR: "Hold {interact} by cracked and broken things",
+	Chore.LIFT: "Hold {interact} by heavy things and wrecks", Chore.HIGH: "Hold {interact} by pictures and high things",
+}
+const MOVE_HOW := {
+	Chore.FLOOR: "Drive over fur, dust and crumbs", Chore.CLUTTER: "Run over books and toys to hide them",
+	Chore.STAIN: "Hold {interact} to THUMP the stains away", Chore.FETCH: "Run into knocked-over things ({interact}: drop)",
+}
 ## The sound of doing it properly.
 const SOUND := {
 	Chore.FLOOR: "c_vacuum", Chore.CLUTTER: "c_swat", Chore.STAIN: "c_thump", Chore.FETCH: "c_fetch",
@@ -101,6 +113,13 @@ static func owned_by(char_id: String) -> int:
 		if OWNER[c] == char_id:
 			return c
 	return Chore.NONE
+
+
+## How to do `chore`; `own_move` if this is the owner's own character.
+static func how(chore: int, own_move: bool) -> String:
+	if own_move and MOVE_HOW.has(chore):
+		return MOVE_HOW[chore]
+	return HOW.get(chore, "Hold {interact} by anything to help")
 
 
 static func face(chore: int) -> String:

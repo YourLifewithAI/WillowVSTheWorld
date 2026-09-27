@@ -347,8 +347,8 @@ func _update_card(c: Dictionary) -> void:
 	var gag_label: Label = c["gag_label"]
 	var gag_name: String = me.data["gag"]["name"]
 	if arena.phase == Match.Phase.CLEANUP or arena.phase == Match.Phase.WHISTLE:
-		# How this character cleans.
-		gag_label.text = String(me.data["tidy_note"]).replace("{interact}", keys["interact"])
+		# How to do the chore this character got (a spare hand's isn't its usual one).
+		gag_label.text = Chores.how(arena.my_chore(me), arena.has_owner_move(me)).replace("{interact}", keys["interact"])
 		gag_label.modulate.a = 1.0
 	elif me.gag_t > 0.0:
 		gag_label.text = "%s!" % gag_name.to_upper()

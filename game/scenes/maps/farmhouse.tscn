@@ -273,7 +273,7 @@ script = ExtResource("5_mess")
 sprite_name = "boots"
 
 [node name="BootsBase" type="Node2D" parent="Entities"]
-position = Vector2(-201.6, 113.6)
+position = Vector2(-172.8, 128)
 script = ExtResource("5_mess")
 sprite_name = "boots"
 
