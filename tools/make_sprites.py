@@ -341,6 +341,15 @@ SPRITES: dict[str, dict] = {
             "bbbbbb",
         ],
     },
+    "plaster": {  # dust and chunks from a smashed wall
+        "palette": {"a": "#f4efe6", "b": "#d9d2c5", "c": "#b8ab94", "d": "#ffffff"},
+        "rows": [
+            "..d.a....",
+            ".abab.ca.",
+            "abcbaabba",
+            ".ab.b.a..",
+        ],
+    },
     "litter": {  # spilled cat litter
         "palette": {"a": "#d8cdb8", "b": "#b8ab94", "c": "#efe7d6"},
         "rows": [

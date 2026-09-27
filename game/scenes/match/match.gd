@@ -29,6 +29,8 @@ const AMBUSH_MULT := 2.0
 const FLIP_KNOCK := 220.0
 ## Most scorch marks, splats and tufts of fur allowed at once.
 const MAX_DEBRIS := 90
+## Bots knock through at most this many walls per team per war.
+const MAX_BREACHES := 2
 
 static var current: Match
 
@@ -68,6 +70,9 @@ var _sync_t := 0.0
 var _remote_sync_t := 0.0
 var _progress_sync_t := 0.0
 var _debris_sync_t := 0.0
+var _plaster_t: Dictionary = {}  # wall panel index -> when it last shed plaster
+## Walls each team has knocked through this war (host; bots stop at MAX_BREACHES).
+var breaches: Array[int] = [0, 0]
 var _load_timeout := 8.0
 var _nav_dirty := false
 ## Players a bot is standing in for while their controller is gone (online).
@@ -474,7 +479,13 @@ func _tick_remote(delta: float) -> void:
 				return
 		TVRemote.State.FLYING:
 			r.timer -= delta
-			r.position = level.clamp_to_floor(r.position + r.vel * delta)
+			var next := level.clamp_to_floor(r.position + r.vel * delta)
+			if not level.wall_between(r.position, next).is_empty():
+				# Thrown into a wall: it drops on this side.
+				r.position = level.clip(r.position, next)
+				r.timer = 0.0
+			else:
+				r.position = next
 			r.z = sin(clampf(r.timer / THROW_TIME, 0.0, 1.0) * PI) * 14.0
 			if r.timer <= 0.0:
 				r.z = 0.0
@@ -495,7 +506,7 @@ func _tick_remote(delta: float) -> void:
 			if p.is_ko or p.captured_by != 0 or (p.pid == r.thrower and r.grace > 0.0):
 				continue
 			var d := Iso.fdist(p.position, r.position)
-			if d < best_d:
+			if d < best_d and level.wall_between(p.position, r.position).is_empty():
 				best = p
 				best_d = d
 		if best:
@@ -794,13 +805,14 @@ func _tick_knockovers() -> void:
 			continue
 		var force := 260.0 if p.tumbling else 120.0
 		for item in level.mess_items:
-			if not item.knocked and Iso.fdist(p.position, item.position) <= 12.0 and item.can_be_knocked_by(force):
+			if not item.knocked and Iso.fdist(p.position, item.position) <= 12.0 and item.can_be_knocked_by(force) \
+					and level.wall_between(p.position, item.position).is_empty():
 				_knock(item, Iso.to_floor(item.position - p.position))
 
 
 func _knock(item: MessItem, dir: Vector2) -> void:
 	var d := dir.normalized() if dir.length() > 0.01 else Vector2.RIGHT
-	var target := level.clamp_to_floor(item.home + Iso.to_screen(d * 16.0), 0.6)
+	var target := level.clip(item.home, level.clamp_to_floor(item.home + Iso.to_screen(d * 16.0), 0.6))
 	_cl_mess_state.rpc(item.index, true, target - item.home)
 
 
@@ -919,7 +931,7 @@ func _srv_gag(pid: int, point: Vector2) -> void:
 				if t.team == p.team or t.is_ko or t.captured_by != 0 or t.invuln > 0.0:
 					continue
 				var d := Iso.fdist(t.position, p.position)
-				if d < best_d:
+				if d < best_d and level.wall_between(p.position, t.position).is_empty():
 					best = t
 					best_d = d
 			if best:
@@ -954,6 +966,8 @@ func _tick_gags(delta: float) -> void:
 			if t.team == z.team or t.is_ko or t.captured_by != 0 or t.invuln > 0.0 or t.data.get("flying", false):
 				continue
 			var d := Iso.fdist(t.position, z.position)
+			if d > float(g["radius"]) or not level.wall_between(z.position, t.position).is_empty():
+				continue
 			if d <= 12.0:
 				_capture(t, z, Player.Capture.SWALLOWED, float(g["swallow_time"]))
 			elif d <= float(g["radius"]) and pulse:
@@ -985,8 +999,12 @@ func _tick_gags(delta: float) -> void:
 			if not item.knocked and Iso.fdist(item.position, at) <= r + 6.0:
 				_knock(item, Iso.to_floor(item.position - at))
 		for f in level.furniture:
-			if f.can_be_damaged() and Iso.fdist(f.position, at) <= r + f.reach():
-				_damage_furniture(f, float(g["demolition"]))
+			if not f is WallPanel and f.can_be_damaged() and Iso.fdist(f.position, at) <= r + f.reach():
+				_damage_furniture(f, float(g["demolition"]), p)
+		# One strike breaks one wall panel at most (it comes through the roof).
+		var wall := _nearest_wall(at, r)
+		if wall:
+			_damage_furniture(wall, float(g["demolition"]), p)
 		_spawn_debris("scorch", at)
 
 
@@ -1096,18 +1114,51 @@ func _srv_furniture_hit(idx: int, amount: float, pid: int, ability: int) -> void
 	if Iso.fdist(by.position, f.position) > 420.0:
 		return
 	var most := Player.CRASH_DAMAGE if ability < 0 else float(Roster.ability(by.data, ability).get("demolition", 0.0))
-	_damage_furniture(f, clampf(amount, 0.0, most))
+	_damage_furniture(f, clampf(amount, 0.0, most), by)
 
 
-func _damage_furniture(f: Furniture, amount: float) -> void:
-	if not f.can_be_damaged():
+func _damage_furniture(f: Furniture, amount: float, by: Player = null) -> void:
+	# Walls shrug off anything but the heavy hitters.
+	if not f.can_be_damaged() or amount < f.min_hit:
 		return
 	f.hp = maxf(0.0, f.hp - amount)
 	var now_wrecked := f.hp <= 0.0
 	_cl_furniture_state.rpc(f.index, f.hp / f.max_hp, now_wrecked, 0.0, 0)
-	if now_wrecked:
+	if f is WallPanel:
+		_wall_damaged(f, now_wrecked, by)
+	elif now_wrecked:
 		_spawn_debris("scorch", f.position)
 		_cl_event.rpc("The %s is destroyed!" % _furniture_name(f), Color("ffb347"))
+
+
+## Plaster dust from every heavy hit (at most one pile a second per panel),
+## and a hole with a feed line when it breaks.
+func _wall_damaged(panel: WallPanel, broke: bool, by: Player) -> void:
+	var side := Iso.to_screen(Vector2(1, 1) * 9.0)  # the dust lands on the visible side
+	var now := _now()
+	if broke:
+		for k in 2:
+			_spawn_debris("plaster", panel.position + side + Iso.to_screen(Vector2(randf_range(-8, 8), randf_range(-8, 8))))
+		var who := by.display_name if by else "Something"
+		var col := Roster.TEAM_COLORS[by.team] if by else Color("ffb347")
+		_cl_event.rpc("%s smashed through the %s!" % [who, panel.label()], col)
+		log_event("breach %s by %d" % [panel.name, by.pid if by else 0])
+		if by:
+			breaches[by.team] += 1
+	elif now - float(_plaster_t.get(panel.index, -10.0)) >= 1.0:
+		_plaster_t[panel.index] = now
+		_spawn_debris("plaster", panel.position + side)
+
+
+## The standing wall panel nearest `at`, within `radius` floor px (or null).
+func _nearest_wall(at: Vector2, radius: float) -> WallPanel:
+	var best: WallPanel = null
+	var best_d := radius
+	for panel in level.wall_panels:
+		if not panel.wrecked and panel.distance_to(at) <= best_d:
+			best = panel
+			best_d = panel.distance_to(at)
+	return best
 
 
 @rpc("authority", "call_local", "reliable")
@@ -1143,15 +1194,32 @@ func _tick_rebuild(f: Furniture, delta: float, send: bool) -> void:
 			power += _tidy_power(p)
 			fixers.append(p)
 	if lift >= f.required_lift():
-		f.rebuild += delta * power / f.rebuild_time()
+		f.rebuild = minf(1.0, f.rebuild + delta * power / f.rebuild_time())
 	f.helpers = lift
+	# A mended wall only turns solid again once nobody is standing in the gap.
+	if f.rebuild >= 1.0 and f is WallPanel and _body_in(f):
+		if send:
+			_cl_furniture_progress.rpc(f.index, f.rebuild, lift)
+		return
 	if f.rebuild >= 1.0:
 		for p in fixers:
 			stats[p.pid]["fixes"] += 2
 		_cl_furniture_state.rpc(f.index, 1.0, false, 0.0, 0)
-		_cl_event.rpc("%s rebuilt the %s!" % [fixers[0].display_name, _furniture_name(f)], Color("8ff0a4"))
+		var who := fixers[0].display_name if not fixers.is_empty() else "Someone"
+		_cl_event.rpc("%s rebuilt the %s!" % [who, _furniture_name(f)], Color("8ff0a4"))
 	elif send:
 		_cl_furniture_progress.rpc(f.index, f.rebuild, lift)
+
+
+## Is anyone standing where this wall panel would be?
+func _body_in(panel: WallPanel) -> bool:
+	var shape := ConvexPolygonShape2D.new()
+	shape.points = panel.solid_polygon(Vector2.ZERO)
+	var query := PhysicsShapeQueryParameters2D.new()
+	query.shape = shape
+	query.transform = panel.global_transform
+	query.collision_mask = 4
+	return not level.get_world_2d().direct_space_state.intersect_shape(query, 1).is_empty()
 
 
 ## Bots re-plan around wrecked (or rebuilt) furniture, at most a few times a second.
@@ -1164,6 +1232,8 @@ func _tick_navigation(delta: float) -> void:
 
 
 static func _furniture_name(f: Furniture) -> String:
+	if f is WallPanel:
+		return f.label()
 	if f.style != Furniture.Style.BOX:
 		return String(Furniture.Style.keys()[f.style]).to_lower().replace("_", " ")
 	var n := String(f.name).rstrip("0123456789")
@@ -1208,9 +1278,12 @@ func _spawn_debris(kind: String, pos: Vector2) -> void:
 func _free_floor_spot(pos: Vector2) -> Vector2:
 	var space := level.get_world_2d().direct_space_state
 	var query := PhysicsPointQueryParameters2D.new()
-	query.collision_mask = 2
+	query.collision_mask = 2 | WallPanel.LAYER
 	var p := level.clamp_to_floor(pos)
-	var toward_center := (level.home.position - p).normalized()
+	# Nudge toward the middle of its own room, so nothing hops a wall.
+	var room := level.room_at(p)
+	var middle := Iso.tile_to_local(room.area.get_center()) if room else level.home.position
+	var toward_center := (middle - p).normalized()
 	for step in 12:
 		query.position = level.to_global(p)
 		if space.intersect_point(query, 1).is_empty():

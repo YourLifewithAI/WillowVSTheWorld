@@ -149,9 +149,9 @@ The pets are sneaky, the robots have sensors.
 This is the joke of the game: they basically destroy the house, then have to
 fix it. Two layers of destruction pile up during the war.
 
-**Furniture has health.** Couches, armchairs, tables, beds, counters, fridges, desks,
-bean bags and even the half-walls crack as they take damage, then collapse into a
-heap of rubble. Rubble isn't solid, so the arena opens up as the war goes on (and
+**Furniture has health.** Couches, armchairs, tables, beds, counters, fridges, desks
+and bean bags crack as they take damage, then collapse into a heap of rubble.
+Inside walls only give way to the heavy hitters (see *The homes*). Rubble isn't solid, so the arena opens up as the war goes on (and
 the bots re-plan their routes). Damage comes from:
 
 - every weapon (each has a `demolition` value: the wrecking ball and bazooka are
@@ -250,10 +250,43 @@ the runs are, where the chokepoints are, how much stuff there is to break.
 
 | Home | Size | Best for | What makes it different |
 |---|---|---|---|
-| **The Living Room** | 16x16, one room | 4-6 | The classic. Open, symmetric, easy to read. Armchairs give cover on the lanes. |
-| **Studio Apartment** | 12x12, one room | 2-4 | Bed, desk and kitchenette crammed together. Short runs, constant brawling, a milk jug that has escaped the fridge. War 2:30, cleanup 0:35. |
-| **The Farmhouse** | 18x16, one big room | 4-6 | Wood stove, farm table with benches that split the pets' lane, muddy boots by the door, a pie on the floor. Cleanup 0:50. |
-| **Suburban House** | 22x14, three rooms | 6-8 | Kitchen, living room and den divided by knee-walls with doorways. The pets hold the kitchen, the robots hold the den. Long runs; passing matters. War 3:30, cleanup 0:55. |
+| **The Family Home** (default) | 18x18, four rooms | 4-8 | Dining room, kitchen, den and living room in a ring (mirror-symmetric). The pets' base is in the kitchen, the robots' in the den, each behind a door with a second way out through the dining room. The remote sits in the living room, the front-most room, so no wall hides the fight. War 3:00, cleanup 1:05. |
+| **Suburban House** | 22x14, five rooms | 6-8 | A long ranch house: kitchen, dining room and mudroom (pets), living room, garage workshop (robots) and den. Four doors into the living room, so eight players never jam one choke. Long runs; passing matters. War 3:30, cleanup 1:10. |
+| **The Farmhouse** | 17x17, four rooms and a porch | 4-6 | Pantry, mudroom (pets), workshop (robots) and a farm kitchen around an old stone chimney that never breaks. A porch runs round the outside, so every base has three ways out. Cleanup 1:00. |
+| **Studio Apartment** | 12x12, one room | 2-4 | Bed, desk and kitchenette crammed together. Short runs, constant brawling, a milk jug that has escaped the fridge. War 2:30, cleanup 0:45. |
+| **The Living Room (classic)** | 16x16, one room | 4-6 | The original: open, symmetric, easy to read. No walls, so it's the place to learn. Cleanup 0:50. |
+
+**The whole house fits on one screen.** The game draws at 640x360 and scales by
+whole numbers (2x in a window, 3x on a 1080p TV), so a home can be at most 36 tiles
+across (width + depth), with 48 px back walls. More rooms, not more floor.
+
+**Inside walls** (`WallRun`, under a map's `Walls` node) are drawn 20 px tall with a
+dark "cut" on top, like a dollhouse, so you can see over them. Each is built into
+one-tile `WallPanel`s (furniture, so damage, cracks, rubble, rebuilding, the bots'
+map and the network sync all work as for a couch), drawn by half-tile slices so
+they depth-sort correctly against people. A wall fades when someone this screen can
+see (or the remote) is in the strip it hides; hidden enemies never make it fade.
+During cleanup every inside wall is see-through, so no mess is ever hidden.
+
+- **What breaks them:** plain painted walls (drywall, 150 hp) ignore any hit under
+  50 demolition. So only the heavy hitters get through: the bazooka (3 shells), the
+  belly flop (2), the wrecking ball (3 swings), the claw drop, the rocket fist (3),
+  the Big Bone (3 whacks) and the satellite laser (1 strike). Stone and outside
+  walls never break.
+- **One hit, one panel:** a blast or swing damages only the nearest panel, so a
+  hole is exactly as big as what was really broken. A swing that lands on someone
+  doesn't dent the wall behind them.
+- **What they stop:** shots (except Bass's waves), blasts, swings, gags that reach
+  across the floor (Mega Suck, the Claw Machine, the Flock Call), a thrown remote,
+  and picking the remote up. Lobbed shells sail over while they're higher than the
+  wall (as drawn) and burst on it when they're lower.
+- **Flyers** (Kiwi, the Claw) fly over the walls, but carrying the remote they fly
+  low and use the doors.
+- **Breaking one** makes a hole everyone can use (the bots re-plan through it), a
+  feed line naming who did it, and plaster dust. Mending it takes two helpers (or
+  Unit-7 or the Claw alone), and it only turns solid again once nobody is standing
+  in the gap. Bots knock through a wall on purpose when the way round is much
+  longer, at most twice per team per war.
 
 **Design rules for a home:**
 
@@ -279,10 +312,18 @@ smart-home-of-the-future where the robots have home advantage.
    in the inspector.
 3. Move the `PetsBase`, `RobotsBase` and `RemoteHome` markers, and arrange
    **Furniture** and **MessItem** nodes under `Entities`. Use **FloorZone**
-   nodes for kitchens, carpets and rugs.
-4. Add an entry to `game/scripts/core/maps.gd` (name, blurb, scene, and any
+   nodes for kitchens, carpets and rugs, and give each room's floor a
+   `room_name`.
+4. For several rooms, add a `Walls` node and a **WallRun** under it for each
+   straight wall: its line (`plane`, `at`), its span (`from`, `to`), its doors
+   (at least 2 tiles wide; 2.5 is standard) and the paint of the room it faces.
+   Stone stretches (`stone_spans`) and outside walls never break. On the Room,
+   set `wall_joins_left/right` where walls meet the back walls, and each room's
+   back-wall paint. Keep bases and the remote's rug out of the strip each wall
+   hides (1.3 tiles behind it); `tests/walls_test.gd` checks.
+5. Add an entry to `game/scripts/core/maps.gd` (name, blurb, scene, and any
    timing overrides) and add its id to `ORDER`.
-5. Run `tools/smoke_test.sh` after adding the map name to `MAPS` in the script.
+6. Run `tools/smoke_test.sh` after adding the map name to `MAPS` in the script.
    It plays a bot match on every home and fails if nobody manages to score.
 
 ## Controls

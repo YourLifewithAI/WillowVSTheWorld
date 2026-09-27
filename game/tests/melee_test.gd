@@ -45,6 +45,7 @@ func _finish() -> void:
 
 func _run() -> void:
 	Net.local_char = "willow"
+	Net.map_id = "living_room"  # the open room: no walls in the way
 	Net.practice()
 	await frames(5)
 	Net.add_bot(Roster.Team.ROBOTS)

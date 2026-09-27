@@ -18,6 +18,12 @@ var _nap_t := randf_range(2.0, 5.0)
 var _path := PackedVector2Array()
 var _path_goal := Vector2.INF
 var _path_t := 0.0
+## Knocking through a wall on purpose (heavy hitters only, see _consider_breach).
+var _breach: WallPanel = null
+var _breach_t := 0.0
+var _breach_hp := 0
+var _breach_check := 1.0
+var _breach_cd := randf_range(8.0, 20.0)
 
 
 func _init(player: Player, match_node: Match) -> void:
@@ -70,6 +76,8 @@ func _war(inp: Dictionary, delta: float) -> void:
 		goal = foe.position
 
 	inp["move"] = _steer(goal, delta)
+	if _breaching(inp, goal, foe, delta):
+		return
 
 	if foe == null or _hesitate > 0.0:
 		return
@@ -77,7 +85,11 @@ func _war(inp: Dictionary, delta: float) -> void:
 	var to_foe := Iso.to_floor(foe.position - me.position).normalized()
 	var w: Dictionary = me.data["weapon"]
 	var kind := int(w["kind"])
-	if not me.carrying and _in_weapon_range(w, dist):
+	# Behind a wall? Keep moving instead of firing into the drywall.
+	var line_clear := arena.level.wall_between(me.position, foe.position).is_empty()
+	var weapon_clear: bool = line_clear or w.get("through_walls", false) \
+		or (kind == Roster.Weapon.LOB and _lob_clear(foe))
+	if not me.carrying and weapon_clear and _in_weapon_range(w, dist):
 		# Turn to face them, then fire (with a little human-ish delay).
 		inp["move"] = to_foe * (0.3 if kind == Roster.Weapon.MELEE else 0.25)
 		if absf(rad_to_deg(me.facing.angle_to(to_foe))) < 30.0 and me.attack_cd <= 0.0:
@@ -88,19 +100,121 @@ func _war(inp: Dictionary, delta: float) -> void:
 	# Right up close: use this character's own close-up move.
 	var m: Dictionary = me.data["melee"]
 	var reach := float(m["range"]) + (float(m["effect_value"]) if m.get("effect", "") == "lunge" else 0.0)
-	if not me.carrying and me.melee_cd <= 0.0 and dist <= reach + 4.0 \
+	if not me.carrying and line_clear and me.melee_cd <= 0.0 and dist <= reach + 4.0 \
 			and (float(m["arc"]) >= 360.0 or absf(rad_to_deg(me.facing.angle_to(to_foe))) < float(m["arc"]) * 0.5) \
 			and _melee_makes_sense(m, foe):
 		inp["interact_pressed"] = true
 		_hesitate = randf_range(0.05, 0.2)
-	elif not me.carrying and me.special_cd <= 0.0 and _special_makes_sense(foe, dist, to_foe):
+	elif not me.carrying and me.special_cd <= 0.0 and (line_clear or _special_needs_no_line(me.data["special"])) \
+			and _special_makes_sense(foe, dist, to_foe):
 		inp["special"] = true
 		_hesitate = 0.3
-	elif not me.carrying and me.gag_charge >= 1.0 and _gag_makes_sense(foe, dist, to_foe):
+	elif not me.carrying and me.gag_charge >= 1.0 and (line_clear or _gag_needs_no_line(me.data["gag"])) \
+			and _gag_makes_sense(foe, dist, to_foe):
 		inp["gag"] = true
 		_hesitate = 0.4
 	if dist > 140.0 and me.dash_cd <= 0.0 and randf() < 0.01:
 		inp["dash"] = true
+
+
+## Specials and gags that don't travel across the floor to reach someone:
+## they work through walls (sound, the satellite) or don't aim at anyone.
+static func _special_needs_no_line(sp: Dictionary) -> bool:
+	return int(sp["kind"]) in [Roster.Special.VANISH, Roster.Special.AURA]
+
+
+static func _gag_needs_no_line(g: Dictionary) -> bool:
+	return int(g["kind"]) in [Roster.Gag.BONE, Roster.Gag.SATELLITE, Roster.Gag.DANCE]
+
+
+## A lobbed shell crosses walls high up, but not near either end of its flight.
+func _lob_clear(foe: Player) -> bool:
+	var level := arena.level
+	var dir := Iso.to_screen(Iso.to_floor(foe.position - me.position).normalized() * 34.0)
+	return level.wall_between(me.position, me.position + dir).is_empty() \
+		and level.wall_between(foe.position - dir, foe.position).is_empty()
+
+
+# ============================================================ breaching
+
+## Which input knocks through a wall for this bot (demolition 50 and up), or "".
+## Flyers go over the walls anyway; Biscuit uses her Belly Flop rather than
+## lining up a bazooka shell.
+func _breach_input() -> String:
+	if me.data.get("flying", false):
+		return ""
+	var w := me.weapon_spec()
+	if int(w["kind"]) == Roster.Weapon.MELEE and float(w.get("demolition", 0.0)) >= WallPanel.MIN_HIT:
+		return "attack"
+	if float(me.data["special"].get("demolition", 0.0)) >= WallPanel.MIN_HIT:
+		return "special"
+	return ""
+
+
+## Once a second: is the way round much longer than straight through a wall?
+## Then knock through it (at most twice per team per war, never late in the
+## war, never in a fight, and not too often per bot).
+func _consider_breach(goal: Vector2, foe: Player) -> void:
+	var tool := _breach_input()
+	if tool == "" or me.carrying or arena.time_left < 30.0 or _breach_cd > 0.0:
+		return
+	if arena.breaches[me.team] >= Match.MAX_BREACHES:
+		return
+	if foe and Iso.fdist(foe.position, me.position) < 60.0:
+		return
+	var straight := Iso.fdist(me.position, goal)
+	if straight < 60.0:
+		return
+	var path := arena.level.find_path(me.position, goal)
+	var walked := 0.0
+	var at := me.position
+	for p in path:
+		walked += Iso.fdist(at, p)
+		at = p
+	if walked < straight * 1.4:
+		return
+	var ahead := me.position + Iso.to_screen(Iso.to_floor(goal - me.position).normalized() * 90.0)
+	var hit := arena.level.wall_between(me.position, ahead)
+	if hit.is_empty() or not (hit["panel"] as WallPanel).can_be_damaged():
+		return
+	_breach = hit["panel"]
+	_breach_t = 6.0
+	_breach_hp = me.hp
+	_breach_cd = 25.0
+
+
+## Carrying out a breach: walk up to the wall, face it, and hit it until it
+## gives (or give up after 6 s, or if we're getting hurt, or the remote needs us).
+func _breaching(inp: Dictionary, goal: Vector2, foe: Player, delta: float) -> bool:
+	_breach_cd -= delta
+	if _breach == null:
+		_breach_check -= delta
+		if _breach_check <= 0.0:
+			_breach_check = 1.0
+			_consider_breach(goal, foe)
+		if _breach == null:
+			return false
+	_breach_t -= delta
+	var r := arena.remote
+	var needed := r.state == TVRemote.State.CARRIED and r.carrier() and r.carrier().team == me.team
+	if _breach.wrecked or _breach_t <= 0.0 or me.hp < _breach_hp - 20 or me.carrying or needed:
+		_breach = null
+		return false
+	var l := _breach.line()
+	var near := Iso.closest_on_segment(me.position, l[0], l[1])
+	var to_wall := Iso.to_floor(near - me.position)
+	var tool := _breach_input()
+	var reach := 20.0 if tool == "attack" or int(me.data["special"]["kind"]) == Roster.Special.SLAM else 60.0
+	if to_wall.length() > reach:
+		inp["move"] = _steer(near, delta)
+		return true
+	inp["move"] = to_wall.normalized() * 0.2
+	if absf(rad_to_deg(me.facing.angle_to(to_wall))) < 25.0:
+		if tool == "attack" and me.attack_cd <= 0.0:
+			inp["attack"] = true
+		elif tool == "special" and me.special_cd <= 0.0:
+			inp["special"] = true
+	return true
 
 
 ## A teammate nearer our base than us, not too far away, to throw to.
@@ -111,7 +225,8 @@ func _open_teammate() -> Player:
 		if p == me or p.team != me.team or p.is_ko:
 			continue
 		var d := Iso.fdist(p.position, me.position)
-		if d > 30.0 and d < 110.0 and Iso.fdist(p.position, base) < my_d:
+		if d > 30.0 and d < 110.0 and Iso.fdist(p.position, base) < my_d \
+				and arena.level.wall_between(me.position, p.position).is_empty():
 			return p
 	return null
 
@@ -200,6 +315,9 @@ func _nearest_enemy(from: Vector2) -> Player:
 		if p.team == me.team or p.is_ko or not arena.is_revealed(p, me.team):
 			continue
 		var d := Iso.fdist(p.position, from)
+		# Someone behind a wall is effectively further away.
+		if not arena.level.wall_between(from, p.position).is_empty():
+			d += 60.0
 		if d < best_d:
 			best = p
 			best_d = d
@@ -284,7 +402,8 @@ func _steer(goal: Vector2, delta: float) -> Vector2:
 	if Iso.fdist(goal, me.position) < 3.0:
 		return Vector2.ZERO
 	var waypoint := goal
-	if not me.data.get("flying", false):
+	# Flyers go straight over furniture and walls, unless the remote weighs them down.
+	if not me.data.get("flying", false) or me.carrying:
 		_path_t -= delta
 		if _path_t <= 0.0 or Iso.fdist(goal, _path_goal) > 12.0:
 			_path_t = 0.3

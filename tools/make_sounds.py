@@ -528,6 +528,12 @@ def _():
     return mix(squish, 0.8 * drop)
 
 
+@sound("tink", 0.5)
+def _():
+    # A weak hit bouncing off a wall: a small bright ping.
+    return mix(bell(2400, 0.18, 1.4), 0.3 * burst(0.02, 7000, 0.004))
+
+
 @sound("thud", 0.55)
 def _():
     return mix(thump(0.1, 160, 70, 0.03), 0.4 * burst(0.04, 900, 0.01))

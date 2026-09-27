@@ -45,7 +45,7 @@ for M in $(grep -rohE 'Audio\.music(_after)?\("[a-z_]+"' "$GAME/scenes" "$GAME/s
 done
 if [ -z "$MISSING" ]; then pass "all $(echo $NAMES | tr ' ' '\n' | sort -u | wc -l) sounds found"; else fail "missing sounds:$MISSING"; fi
 
-MAPS="living_room studio farmhouse suburbs"
+MAPS="family_home suburbs farmhouse studio living_room"
 for MAP in $MAPS; do
   echo "== Practice match on $MAP (3v3 bots, simulated as fast as possible)"
   LOG="$OUT/practice_$MAP.log"
@@ -76,6 +76,15 @@ echo "== Shared screen: four people on fake Joy-Cons and a controller"
 no_script_errors "$OUT/couch.log" "couch"
 grep -E "^  (PASS|FAIL)  couch:" "$OUT/couch.log"
 if grep -q "FAIL  couch:" "$OUT/couch.log" || ! grep -q "^\[couch\] [0-9]* passed, 0 failed" "$OUT/couch.log"; then
+  FAILED=1
+fi
+
+echo "== Walls: what breaks them, what they stop, and the bots' routes"
+"$GODOT" --headless --fixed-fps 60 --path "$GAME" res://tests/walls_test.tscn -- --war=300 \
+  > "$OUT/walls.log" 2>&1
+no_script_errors "$OUT/walls.log" "walls"
+grep -E "^  (PASS|FAIL)  walls:" "$OUT/walls.log"
+if grep -q "FAIL  walls:" "$OUT/walls.log" || ! grep -q "^\[walls\] [0-9]* passed, 0 failed" "$OUT/walls.log"; then
   FAILED=1
 fi
 

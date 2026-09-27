@@ -6,6 +6,7 @@
 [ext_resource type="Script" path="res://scenes/level/furniture.gd" id="4_furn"]
 [ext_resource type="Script" path="res://scenes/level/mess_item.gd" id="5_mess"]
 [ext_resource type="Script" path="res://scenes/level/floor_zone.gd" id="6_floor"]
+[ext_resource type="Script" path="res://scenes/level/wall_run.gd" id="7_wall"]
 
 [node name="SuburbanHouse" type="Node2D"]
 script = ExtResource("1_level")
@@ -14,7 +15,7 @@ script = ExtResource("1_level")
 z_index = -10
 script = ExtResource("2_room")
 size_tiles = Vector2i(22, 14)
-wall_height = 56
+wall_height = 48
 floor_style = 0
 floor_colors = Array[Color]([Color(0.851, 0.6275, 0.4, 1), Color(0.8118, 0.5843, 0.3608, 1), Color(0.8863, 0.6706, 0.4471, 1)])
 wall_style = 0
@@ -26,31 +27,60 @@ door_left = Vector2(9, 10.6)
 fish_painting_j = 12.8
 bolt_poster_i = 19.8
 clock_i = 7.7
+right_paints = PackedColorArray(0.8510, 0.9373, 0.8863, 1, 0.9686, 0.8627, 0.7961, 1, 0.8706, 0.8588, 0.8235, 1)
+right_paint_breaks = PackedFloat32Array(7, 15)
+left_paints = PackedColorArray(0.8510, 0.9373, 0.8863, 1, 0.9647, 0.9059, 0.8118, 1)
+left_paint_breaks = PackedFloat32Array(7)
+wall_joins_left = PackedFloat32Array(7)
+wall_joins_right = PackedFloat32Array(7, 15)
 
 [node name="Floors" type="Node2D" parent="."]
 
 [node name="Kitchen" type="Node2D" parent="Floors"]
 script = ExtResource("6_floor")
-area = Rect2(0, 0, 7, 14)
+area = Rect2(0, 0, 7, 7)
 style = 1
-colors = Array[Color]([Color(0.9569, 0.9451, 0.9176, 1), Color(0.8118, 0.8784, 0.8157, 1)])
+colors = Array[Color]([Color(0.9569, 0.9451, 0.9176, 1), Color(0.8118, 0.8824, 0.8157, 1)])
+room_name = "Kitchen"
+
+[node name="Dining" type="Node2D" parent="Floors"]
+script = ExtResource("6_floor")
+area = Rect2(0, 7, 7, 7)
+style = 0
+colors = Array[Color]([Color(0.7882, 0.5608, 0.3529, 1), Color(0.7490, 0.5216, 0.3176, 1), Color(0.8275, 0.6039, 0.3882, 1)])
+room_name = "Dining room"
+
+[node name="Living" type="Node2D" parent="Floors"]
+script = ExtResource("6_floor")
+area = Rect2(7, 0, 8, 14)
+style = 0
+colors = Array[Color]([Color(0.8510, 0.6275, 0.4000, 1), Color(0.8118, 0.5843, 0.3608, 1), Color(0.8863, 0.6706, 0.4471, 1)])
+room_name = "Living room"
+
+[node name="Garage" type="Node2D" parent="Floors"]
+script = ExtResource("6_floor")
+area = Rect2(15, 0, 7, 7)
+style = 1
+colors = Array[Color]([Color(0.7255, 0.7373, 0.7608, 1), Color(0.6627, 0.6784, 0.7059, 1)])
+room_name = "Garage"
 
 [node name="Den" type="Node2D" parent="Floors"]
 script = ExtResource("6_floor")
-area = Rect2(15, 0, 7, 14)
+area = Rect2(15, 7, 7, 7)
 style = 2
-colors = Array[Color]([Color(0.6235, 0.7216, 0.851, 1), Color(0.7216, 0.8, 0.902, 1)])
+colors = Array[Color]([Color(0.6235, 0.7216, 0.8510, 1), Color(0.7216, 0.8000, 0.9020, 1)])
+room_name = "Den"
 
 [node name="Zones" type="Node2D" parent="."]
 
 [node name="PetsBase" type="Node2D" parent="Zones"]
-position = Vector2(-144, 112)
+position = Vector2(-112, 112)
 script = ExtResource("3_zone")
 team = 0
 radius = 32
 
 [node name="RobotsBase" type="Node2D" parent="Zones"]
-position = Vector2(272, 176)
+position = Vector2(240, 176)
 script = ExtResource("3_zone")
 team = 1
 radius = 32
@@ -60,6 +90,74 @@ position = Vector2(64, 144)
 script = ExtResource("3_zone")
 team = -1
 radius = 12
+
+[node name="Walls" type="Node2D" parent="."]
+
+[node name="LivingWestA" type="Node2D" parent="Walls"]
+script = ExtResource("7_wall")
+plane = 0
+at = 7
+from = 0
+to = 7
+doors = PackedVector2Array(2, 4.5)
+surface = 0
+face_color = Color(0.9686, 0.8627, 0.7961, 1)
+label = "living room wall"
+
+[node name="LivingWestB" type="Node2D" parent="Walls"]
+script = ExtResource("7_wall")
+plane = 0
+at = 7
+from = 7
+to = 14
+doors = PackedVector2Array(11, 13.5)
+surface = 0
+face_color = Color(0.9686, 0.8627, 0.7961, 1)
+label = "living room wall"
+
+[node name="GarageWest" type="Node2D" parent="Walls"]
+script = ExtResource("7_wall")
+plane = 0
+at = 15
+from = 0
+to = 7
+doors = PackedVector2Array(0.5, 3)
+surface = 0
+face_color = Color(0.8706, 0.8588, 0.8235, 1)
+label = "garage wall"
+
+[node name="DenWest" type="Node2D" parent="Walls"]
+script = ExtResource("7_wall")
+plane = 0
+at = 15
+from = 7
+to = 14
+doors = PackedVector2Array(9.5, 12)
+surface = 0
+face_color = Color(0.8392, 0.8667, 0.9137, 1)
+label = "den wall"
+
+[node name="DiningNorth" type="Node2D" parent="Walls"]
+script = ExtResource("7_wall")
+plane = 1
+at = 7
+from = 0
+to = 7
+doors = PackedVector2Array(2, 4.5)
+surface = 0
+face_color = Color(0.9647, 0.9059, 0.8118, 1)
+label = "dining room wall"
+
+[node name="DenNorth" type="Node2D" parent="Walls"]
+script = ExtResource("7_wall")
+plane = 1
+at = 7
+from = 15
+to = 22
+doors = PackedVector2Array(17.5, 20)
+surface = 0
+face_color = Color(0.8392, 0.8667, 0.9137, 1)
+label = "den wall"
 
 [node name="Entities" type="Node2D" parent="."]
 y_sort_enabled = true
@@ -111,15 +209,6 @@ color = Color(0.5608, 0.702, 0.8784, 1)
 accent = Color(0.9569, 0.9451, 0.9176, 1)
 detail = 1
 
-[node name="CounterLeft4" type="StaticBody2D" parent="Entities"]
-position = Vector2(-80.8, 49.2)
-script = ExtResource("4_furn")
-style = 8
-size = Vector2(1.1, 1)
-height = 16
-color = Color(0.5608, 0.702, 0.8784, 1)
-accent = Color(0.9569, 0.9451, 0.9176, 1)
-
 [node name="CounterRight0" type="StaticBody2D" parent="Entities"]
 position = Vector2(16.8, 17.2)
 script = ExtResource("4_furn")
@@ -148,7 +237,7 @@ color = Color(0.5608, 0.702, 0.8784, 1)
 accent = Color(0.9569, 0.9451, 0.9176, 1)
 
 [node name="Fridge" type="StaticBody2D" parent="Entities"]
-position = Vector2(-97.6, 58.4)
+position = Vector2(-80, 49.6)
 script = ExtResource("4_furn")
 style = 10
 size = Vector2(1.1, 1.1)
@@ -182,166 +271,6 @@ height = 30
 color = Color(0.7804, 0.6039, 0.4196, 1)
 accent = Color(1, 0.5608, 0.6706, 1)
 
-[node name="KitchenWallA0" type="StaticBody2D" parent="Entities"]
-position = Vector2(104, 60)
-script = ExtResource("4_furn")
-style = 13
-size = Vector2(0.3, 1)
-height = 12
-color = Color(0.9176, 0.9451, 0.9725, 1)
-
-[node name="KitchenWallA1" type="StaticBody2D" parent="Entities"]
-position = Vector2(88, 68)
-script = ExtResource("4_furn")
-style = 13
-size = Vector2(0.3, 1)
-height = 12
-color = Color(0.9176, 0.9451, 0.9725, 1)
-
-[node name="KitchenWallA2" type="StaticBody2D" parent="Entities"]
-position = Vector2(72, 76)
-script = ExtResource("4_furn")
-style = 13
-size = Vector2(0.3, 1)
-height = 12
-color = Color(0.9176, 0.9451, 0.9725, 1)
-
-[node name="KitchenWallA3" type="StaticBody2D" parent="Entities"]
-position = Vector2(56, 84)
-script = ExtResource("4_furn")
-style = 13
-size = Vector2(0.3, 1)
-height = 12
-color = Color(0.9176, 0.9451, 0.9725, 1)
-
-[node name="KitchenWallA4" type="StaticBody2D" parent="Entities"]
-position = Vector2(40, 92)
-script = ExtResource("4_furn")
-style = 13
-size = Vector2(0.3, 1)
-height = 12
-color = Color(0.9176, 0.9451, 0.9725, 1)
-
-[node name="KitchenWallB0" type="StaticBody2D" parent="Entities"]
-position = Vector2(-40, 132)
-script = ExtResource("4_furn")
-style = 13
-size = Vector2(0.3, 1)
-height = 12
-color = Color(0.9176, 0.9451, 0.9725, 1)
-
-[node name="KitchenWallB1" type="StaticBody2D" parent="Entities"]
-position = Vector2(-56, 140)
-script = ExtResource("4_furn")
-style = 13
-size = Vector2(0.3, 1)
-height = 12
-color = Color(0.9176, 0.9451, 0.9725, 1)
-
-[node name="KitchenWallB2" type="StaticBody2D" parent="Entities"]
-position = Vector2(-72, 148)
-script = ExtResource("4_furn")
-style = 13
-size = Vector2(0.3, 1)
-height = 12
-color = Color(0.9176, 0.9451, 0.9725, 1)
-
-[node name="KitchenWallB3" type="StaticBody2D" parent="Entities"]
-position = Vector2(-88, 156)
-script = ExtResource("4_furn")
-style = 13
-size = Vector2(0.3, 1)
-height = 12
-color = Color(0.9176, 0.9451, 0.9725, 1)
-
-[node name="KitchenWallB4" type="StaticBody2D" parent="Entities"]
-position = Vector2(-104, 164)
-script = ExtResource("4_furn")
-style = 13
-size = Vector2(0.3, 1)
-height = 12
-color = Color(0.9176, 0.9451, 0.9725, 1)
-
-[node name="DenWallA0" type="StaticBody2D" parent="Entities"]
-position = Vector2(232, 124)
-script = ExtResource("4_furn")
-style = 13
-size = Vector2(0.3, 1)
-height = 12
-color = Color(0.9176, 0.9451, 0.9725, 1)
-
-[node name="DenWallA1" type="StaticBody2D" parent="Entities"]
-position = Vector2(216, 132)
-script = ExtResource("4_furn")
-style = 13
-size = Vector2(0.3, 1)
-height = 12
-color = Color(0.9176, 0.9451, 0.9725, 1)
-
-[node name="DenWallA2" type="StaticBody2D" parent="Entities"]
-position = Vector2(200, 140)
-script = ExtResource("4_furn")
-style = 13
-size = Vector2(0.3, 1)
-height = 12
-color = Color(0.9176, 0.9451, 0.9725, 1)
-
-[node name="DenWallA3" type="StaticBody2D" parent="Entities"]
-position = Vector2(184, 148)
-script = ExtResource("4_furn")
-style = 13
-size = Vector2(0.3, 1)
-height = 12
-color = Color(0.9176, 0.9451, 0.9725, 1)
-
-[node name="DenWallA4" type="StaticBody2D" parent="Entities"]
-position = Vector2(168, 156)
-script = ExtResource("4_furn")
-style = 13
-size = Vector2(0.3, 1)
-height = 12
-color = Color(0.9176, 0.9451, 0.9725, 1)
-
-[node name="DenWallB0" type="StaticBody2D" parent="Entities"]
-position = Vector2(88, 196)
-script = ExtResource("4_furn")
-style = 13
-size = Vector2(0.3, 1)
-height = 12
-color = Color(0.9176, 0.9451, 0.9725, 1)
-
-[node name="DenWallB1" type="StaticBody2D" parent="Entities"]
-position = Vector2(72, 204)
-script = ExtResource("4_furn")
-style = 13
-size = Vector2(0.3, 1)
-height = 12
-color = Color(0.9176, 0.9451, 0.9725, 1)
-
-[node name="DenWallB2" type="StaticBody2D" parent="Entities"]
-position = Vector2(56, 212)
-script = ExtResource("4_furn")
-style = 13
-size = Vector2(0.3, 1)
-height = 12
-color = Color(0.9176, 0.9451, 0.9725, 1)
-
-[node name="DenWallB3" type="StaticBody2D" parent="Entities"]
-position = Vector2(40, 220)
-script = ExtResource("4_furn")
-style = 13
-size = Vector2(0.3, 1)
-height = 12
-color = Color(0.9176, 0.9451, 0.9725, 1)
-
-[node name="DenWallB4" type="StaticBody2D" parent="Entities"]
-position = Vector2(24, 228)
-script = ExtResource("4_furn")
-style = 13
-size = Vector2(0.3, 1)
-height = 12
-color = Color(0.9176, 0.9451, 0.9725, 1)
-
 [node name="TV" type="StaticBody2D" parent="Entities"]
 position = Vector2(164, 94)
 script = ExtResource("4_furn")
@@ -368,13 +297,14 @@ color = Color(0.498, 0.6549, 0.851, 1)
 accent = Color(0.8118, 0.8902, 1, 1)
 
 [node name="ArmchairRobots" type="StaticBody2D" parent="Entities"]
-position = Vector2(54.4, 184)
+position = Vector2(144, 139.2)
 script = ExtResource("4_furn")
 style = 1
 size = Vector2(1.4, 1.4)
 height = 12
 color = Color(0.498, 0.6549, 0.851, 1)
 accent = Color(0.8118, 0.8902, 1, 1)
+flip = true
 flip = true
 
 [node name="Desk" type="StaticBody2D" parent="Entities"]
@@ -386,7 +316,7 @@ height = 12
 color = Color(0.7098, 0.4588, 0.298, 1)
 
 [node name="BeanbagA" type="StaticBody2D" parent="Entities"]
-position = Vector2(182.4, 190.4)
+position = Vector2(156.8, 251.2)
 script = ExtResource("4_furn")
 style = 12
 size = Vector2(1, 1)
@@ -484,7 +414,7 @@ script = ExtResource("5_mess")
 sprite_name = "books"
 
 [node name="Bookshelf" type="Node2D" parent="Entities"]
-position = Vector2(241.6, 132)
+position = Vector2(302.4, 162.4)
 script = ExtResource("5_mess")
 sprite_name = "bookshelf"
 heavy = true
@@ -521,3 +451,39 @@ position = Vector2(134.4, 272)
 script = ExtResource("5_mess")
 sprite_name = "plant"
 spill_sprite = "dirt"
+
+[node name="Workbench" type="StaticBody2D" parent="Entities"]
+position = Vector2(204.8, 176)
+script = ExtResource("4_furn")
+style = 3
+size = Vector2(1.6, 1.6)
+height = 12
+color = Color(0.6039, 0.6275, 0.6588, 1)
+accent = Color(0.8745, 0.8941, 0.9255, 1)
+
+[node name="DenDesk" type="StaticBody2D" parent="Entities"]
+position = Vector2(139.2, 220)
+script = ExtResource("4_furn")
+style = 11
+size = Vector2(1, 2.2)
+height = 12
+color = Color(0.7098, 0.4588, 0.2980, 1)
+
+[node name="Bookcase" type="StaticBody2D" parent="Entities"]
+position = Vector2(-36, 194)
+script = ExtResource("4_furn")
+style = 0
+size = Vector2(1.4, 1.1)
+height = 22
+color = Color(0.5412, 0.3529, 0.2353, 1)
+sturdiness = 0.0
+
+[node name="Loveseat" type="StaticBody2D" parent="Entities"]
+position = Vector2(9.6, 171.2)
+script = ExtResource("4_furn")
+style = 2
+size = Vector2(3, 1.1)
+height = 12
+color = Color(0.8784, 0.4784, 0.3725, 1)
+accent = Color(1.0000, 0.8392, 0.6471, 1)
+flip = true

@@ -133,6 +133,7 @@ func release_sticks() -> void:
 
 func _run() -> void:
 	print("== Shared screen (fake Joy-Cons)")
+	Net.map_id = "living_room"  # the open room: no walls in the way
 	Net.practice()
 	await frames(10)
 	check(Seats.seats.size() == 1 and Seats.solo(), "before anyone joins, you're playing alone on every controller")
@@ -328,6 +329,7 @@ func _keyboard_checks() -> void:
 	# J first takes P1 for the keyboard; a controller joining later is P2.
 	Net.leave()
 	await frames(10)
+	Net.map_id = "living_room"  # the open room: no walls in the way
 	Net.practice()
 	await frames(10)
 	await key(KEY_J)
@@ -352,6 +354,7 @@ func _keyboard_checks() -> void:
 	# if the controller dies.
 	Net.leave()
 	await frames(10)
+	Net.map_id = "living_room"  # the open room: no walls in the way
 	Net.practice()
 	await frames(10)
 	await tap(PRO, Seats.B_SOUTH)

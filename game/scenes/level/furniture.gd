@@ -9,7 +9,7 @@ extends StaticBody2D
 ## characters being launched into it) and has to be rebuilt during cleanup.
 ## The host owns its health; every peer mirrors it through apply_state().
 
-enum Style { BOX, ARMCHAIR, COUCH, TABLE, TV, CAT_TREE, DOCK, BED, COUNTER, STOVE, FRIDGE, DESK, BEANBAG, WALL, PET_BED }
+enum Style { BOX, ARMCHAIR, COUCH, TABLE, TV, CAT_TREE, DOCK, BED, COUNTER, STOVE, FRIDGE, DESK, BEANBAG, WALL, PET_BED, HOUSE_WALL, STAIRS }
 enum Detail { NONE, SINK, BURNERS }
 
 @export var style: Style = Style.BOX:
@@ -52,6 +52,12 @@ enum Detail { NONE, SINK, BURNERS }
 ## How much punishment it takes before it's wrecked.
 ## -1 picks a value for the style; 0 makes it indestructible.
 @export var sturdiness := -1.0
+## Hits weaker than this do no damage at all (a laser just goes "tink").
+@export var min_hit := 0.0
+## How much of the footprint is solid (a little less than drawn, so characters
+## can squeeze past neighbouring pieces), and the physics layer it's on.
+@export var footprint_scale := 0.92
+@export var collision_layer_value := 2
 
 ## For Style.TV: -1 = off, otherwise the team whose show is on.
 var channel := -1:
@@ -64,6 +70,7 @@ const STURDINESS := {
 	Style.BOX: 40.0, Style.ARMCHAIR: 55.0, Style.COUCH: 80.0, Style.TABLE: 40.0, Style.TV: 0.0,
 	Style.CAT_TREE: 0.0, Style.DOCK: 0.0, Style.BED: 80.0, Style.COUNTER: 90.0, Style.STOVE: 0.0,
 	Style.FRIDGE: 110.0, Style.DESK: 45.0, Style.BEANBAG: 20.0, Style.WALL: 60.0, Style.PET_BED: 0.0,
+	Style.HOUSE_WALL: 150.0, Style.STAIRS: 0.0,
 }
 
 var index := -1
@@ -81,7 +88,7 @@ var _t := 0.0
 
 
 func _ready() -> void:
-	collision_layer = 2
+	collision_layer = collision_layer_value
 	collision_mask = 0
 	max_hp = sturdiness if sturdiness >= 0.0 else float(STURDINESS.get(style, 60.0))
 	hp = max_hp
@@ -89,7 +96,7 @@ func _ready() -> void:
 		return
 	if solid:
 		_poly = CollisionPolygon2D.new()
-		_poly.polygon = Iso.footprint(size * 0.92)
+		_poly.polygon = Iso.footprint(size * footprint_scale)
 		add_child(_poly)
 	_overlay = Node2D.new()
 	_overlay.z_index = 20
@@ -104,6 +111,11 @@ func can_be_damaged() -> bool:
 ## Roughly how far the footprint reaches from its centre, in floor pixels.
 func reach() -> float:
 	return maxf(size.x, size.y) * 11.3
+
+
+## Roughly how far `p` is from the edge of this piece, in floor pixels.
+func distance_to(p: Vector2) -> float:
+	return Iso.fdist(p, position) - reach()
 
 
 ## How much a wreck counts against the house's tidiness.
@@ -228,6 +240,14 @@ func _draw() -> void:
 			_box(Vector2.ZERO, Vector2(w, d), 0, height, color)
 		Style.BEANBAG, Style.PET_BED:
 			pass  # Drawn in _draw_details.
+		Style.STAIRS:
+			# Steps climbing toward the back (its own -i side), with a banister.
+			var steps := 6
+			for k in steps:
+				var depth := w / steps
+				_box(Vector2(w * 0.5 - depth * (k + 0.5), 0), Vector2(depth, d), 0, height * (k + 1) / steps,
+					color if k % 2 == 0 else color.darkened(0.06))
+			_box(Vector2(0, d * 0.5 - 0.05), Vector2(w, 0.1), height * 0.5, height + 8, accent)
 	_flush_boxes()
 	_draw_details(w, d)
 	if max_hp > 0.0 and hp < max_hp * 0.66:

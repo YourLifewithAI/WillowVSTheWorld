@@ -25,13 +25,27 @@ everybody is grounded.
 
 Pick where the fight happens in the lobby. Each home plays differently.
 
-| Studio Apartment | The Farmhouse | Suburban House |
+| The Family Home | Suburban House | The Farmhouse |
 |---|---|---|
-| ![Studio apartment map](docs/images/map_studio.png) | ![Farmhouse map](docs/images/map_farmhouse.png) | ![Suburban house map](docs/images/map_suburbs.png) |
-| Tiny, cramped, constant brawling. 2-4 players. | Wood stove, farm table, a pie on the floor. 4-6 players. | Kitchen, living room and den behind knee-walls. 6-8 players. |
+| ![Family home map](docs/images/map_family_home.png) | ![Suburban house map](docs/images/map_suburbs.png) | ![Farmhouse map](docs/images/map_farmhouse.png) |
+| Kitchen, dining room, den and living room in a ring. The default. 4-8 players. | A long ranch house: kitchen, dining room, living room, garage and den. 6-8 players. | Four rooms round an old stone chimney, with a porch all the way round. 4-6 players. |
 
-...plus **The Living Room**, the original. The design doc has a list of homes
-to build next and a step-by-step guide to making your own.
+...plus the **Studio Apartment** (one tiny room, constant brawling, 2-4 players) and
+**The Living Room (classic)**, the original open room, a good place to learn.
+
+**Inside walls** are drawn like a dollhouse with the top cut off, so you can see
+over them, and they turn see-through when someone's behind them. Shots, blasts,
+swings and a thrown remote all stop at them (except Bass's bass waves, which go
+right through). Only the **big hitters** can knock through a plain painted wall:
+Biscuit's bazooka and belly flop, the Claw's wrecking ball and claw drop, Unit-7's
+rocket fist and satellite laser, and Pepper while he holds the Big Bone. Everything
+else just goes *tink*. Stone and outside walls never break. A hole is a new way
+through for everyone, and one more thing to fix before the parents get home.
+Birds and the Claw fly over the walls, but not while carrying the remote: it
+weighs them down, so they have to use the doors.
+
+The design doc has a list of homes to build next and a step-by-step guide to
+making your own.
 
 The full design (rules, roster, homes, art direction, networking, roadmap) is in
 **[docs/GAME_DESIGN.md](docs/GAME_DESIGN.md)**.
@@ -194,7 +208,7 @@ tools/smoke_test.sh path/to/godot
 
 Runs headless (no window): imports the project, checks that every sound the game
 asks for exists, plays a full 3v3 bot match on every home at top speed (checking the
-phase sounds and music fire), then plays a real host + client network match over
+phase sounds and music fire), checks the walls' rules (`tests/walls_test.gd`), then plays a real host + client network match over
 localhost and checks that both machines agree on the map and the result. Two
 scripted tests run too: `tests/couch_test.gd` (shared screen, with fake Joy-Cons) and
 `tests/melee_test.gd` (every character's close-up move, and what each one does). Takes

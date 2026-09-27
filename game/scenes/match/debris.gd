@@ -5,7 +5,7 @@ extends Node2D
 ## spilled cat litter.
 ## More fighting now means more scrubbing later.
 
-const CLEAN_TIMES := {"fur": 0.8, "bolts": 0.8, "scorch": 1.2, "yolk": 1.0, "litter": 0.9}
+const CLEAN_TIMES := {"fur": 0.8, "bolts": 0.8, "scorch": 1.2, "yolk": 1.0, "litter": 0.9, "plaster": 1.0}
 
 var debris_id := 0
 var kind := "fur"

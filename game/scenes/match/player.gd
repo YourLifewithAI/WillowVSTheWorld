@@ -25,6 +25,8 @@ const KNOCK_DECAY := 7.0
 const TUMBLE_SPEED := 140.0
 ## Body radius on the floor, used for hit checks.
 const BODY_RADIUS := 7.0
+## How high a flyer can manage while carrying the remote (below the walls' tops).
+const CARRY_HOVER := 6.0
 ## How long a knockup keeps you in the air (just a visual; the stun does the rest).
 const HOP_TIME := 0.5
 ## After a close-up move, how long before your weapon can fire again.
@@ -58,7 +60,11 @@ var hp := 100
 var max_hp := 100
 var is_ko := false
 var invuln := 0.0
-var carrying := false
+var carrying := false:
+	set(v):
+		if v != carrying:
+			carrying = v
+			_update_mask()
 ## Held by another player's gag (swallowed by Zoomba, grabbed by the Claw).
 var captured_by := 0
 var capture_mode: Capture = Capture.NONE
@@ -123,6 +129,7 @@ var _flip_t := 0.0
 var _revealed := false
 var _showing_bone := false
 var _hop_t := 0.0
+var _seen := true
 var _hop_h := 0.0
 ## A pounce in the air: the melee move to swing when it lands.
 var _pounce: Dictionary = {}
@@ -146,9 +153,7 @@ func setup(p_id: int, info: Dictionary, p_arena: Match) -> void:
 
 func _ready() -> void:
 	collision_layer = 4
-	# Flyers pass over furniture; Zoomba drives under it.
-	var over_furniture: bool = data.get("flying", false) or data.get("low_profile", false)
-	collision_mask = 1 if over_furniture else 3
+	_update_mask()
 	motion_mode = CharacterBody2D.MOTION_MODE_FLOATING
 	z = hover()
 	_net_pos = position
@@ -175,8 +180,30 @@ func _ready() -> void:
 	add_child(_overlay)
 
 
+## Can the people looking at this screen see us right now? (Stealthed enemies
+## can't be; teammates and see-through hidden characters on a shared sofa can.)
+func seen_here() -> bool:
+	return _seen
+
+
+## What this character bumps into: the room's shell (1), furniture (2) and
+## walls (8). Flyers pass over furniture and the cutaway walls, but the remote
+## weighs them down: carrying it, they fly low and have to use the doors.
+## Zoomba drives under furniture, never through walls.
+func _update_mask() -> void:
+	if data.get("flying", false):
+		collision_mask = 1 | WallPanel.LAYER if carrying else 1
+	elif data.get("low_profile", false):
+		collision_mask = 1 | WallPanel.LAYER
+	else:
+		collision_mask = 1 | 2 | WallPanel.LAYER
+
+
 func hover() -> float:
-	return float(data.get("hover", 0.0))
+	var h := float(data.get("hover", 0.0))
+	if carrying and data.get("flying", false):
+		return minf(h, CARRY_HOVER)
+	return h
 
 
 ## Played by someone looking at this screen (you, or a guest sharing it).
@@ -278,6 +305,8 @@ func _owner_tick(delta: float) -> void:
 	if _dash_t > 0.0:
 		_dash_t -= delta
 		v = facing * DASH_SPEED
+	if data.get("flying", false) and not is_ko and _slam_t <= 0.0 and not is_equal_approx(z, hover()):
+		z = move_toward(z, hover(), 60.0 * delta)  # sinking under the remote's weight, or rising again
 	if _slam_t > 0.0:
 		_slam_t -= delta
 		var sp: Dictionary = data["special"]
@@ -355,7 +384,7 @@ func _check_crashes(delta: float) -> void:
 		return
 	for k in get_slide_collision_count():
 		var f := get_slide_collision(k).get_collider() as Furniture
-		if f and not _crash_cd.has(f):
+		if f and not f is WallPanel and not _crash_cd.has(f):
 			_crash_cd[f] = 0.4
 			arena.report_furniture_hit(f, CRASH_DAMAGE, self, -1)
 
@@ -478,16 +507,21 @@ func _do_gag() -> void:
 ## Flock Call: everyone in a wide lane ahead gets bowled over at once.
 func _flock_hits(g: Dictionary) -> void:
 	var side := Vector2(-facing.y, facing.x)
+	# The stampede stops at the first wall.
+	var lane := float(g["length"])
+	var wall := arena.level.wall_between(position, position + Iso.to_screen(facing * lane))
+	if not wall.is_empty():
+		lane = Iso.fdist(position, wall["point"])
 	for other: Player in arena.players.values():
 		if other.team == team or other.is_ko:
 			continue
 		var off := Iso.to_floor(other.position - position)
 		var along := off.dot(facing)
-		if along > 0.0 and along <= float(g["length"]) and absf(off.dot(side)) <= float(g["width"]):
+		if along > 0.0 and along <= lane and absf(off.dot(side)) <= float(g["width"]):
 			arena.report_hit(self, other, 2, facing)
 	for item in arena.level.mess_items:
 		var off := Iso.to_floor(item.position - position)
-		if off.dot(facing) > 0.0 and off.dot(facing) <= float(g["length"]) and absf(off.dot(side)) <= float(g["width"]):
+		if off.dot(facing) > 0.0 and off.dot(facing) <= lane and absf(off.dot(side)) <= float(g["width"]):
 			arena.report_mess_hit(item, g["knock"], facing)
 
 
@@ -568,6 +602,7 @@ func _hit_arc(w: Dictionary, ability: int, ambush: bool) -> void:
 	var reach: float = w["range"]
 	# A full circle (Zoomba's spin) must include straight behind, despite rounding.
 	var half_arc: float = float(w["arc"]) * 0.5 + 0.01
+	var hit_someone := false
 	for other: Player in arena.players.values():
 		if other.team == team or other.is_ko:
 			continue
@@ -577,6 +612,9 @@ func _hit_arc(w: Dictionary, ability: int, ambush: bool) -> void:
 			continue
 		if d > 4.0 and absf(rad_to_deg(facing.angle_to(off))) > half_arc:
 			continue
+		if _walled(position, other.position):
+			continue
+		hit_someone = true
 		arena.report_hit(self, other, ability, off.normalized() if d > 0.1 else facing, ambush)
 	# Some close-up moves are made for knocking things over.
 	var item_force := float(w["knock"])
@@ -584,12 +622,20 @@ func _hit_arc(w: Dictionary, ability: int, ambush: bool) -> void:
 		item_force = maxf(item_force, float(w.get("effect_value", 0.0)))
 	for item in arena.level.mess_items:
 		var off := Iso.to_floor(item.position - position)
-		if off.length() <= reach + 6.0 and (off.length() < 4.0 or absf(rad_to_deg(facing.angle_to(off))) <= half_arc):
+		if off.length() <= reach + 6.0 and (off.length() < 4.0 or absf(rad_to_deg(facing.angle_to(off))) <= half_arc) \
+				and not _walled(position, item.position):
 			arena.report_mess_hit(item, item_force, off)
 	for f in arena.level.furniture:
+		if f is WallPanel:
+			continue
 		var off := Iso.to_floor(f.position - position)
-		if f.can_be_damaged() and off.length() <= reach + f.reach() and absf(rad_to_deg(facing.angle_to(off))) <= half_arc:
+		if f.can_be_damaged() and off.length() <= reach + f.reach() and absf(rad_to_deg(facing.angle_to(off))) <= half_arc \
+				and not _walled(position, f.position):
 			arena.report_furniture_hit(f, w.get("demolition", 0.0), self, ability)
+	# A swing that lands on someone doesn't also dent the wall behind them:
+	# walls break when you swing at the wall.
+	if not hit_someone:
+		_hit_nearest_wall(position, reach, half_arc, float(w.get("demolition", 0.0)), ability)
 
 
 ## Reports every enemy, breakable and piece of furniture within a radius of a point.
@@ -598,17 +644,50 @@ func hit_area(center: Vector2, radius: float, ability: int, force: float, demoli
 		if other.team == team or other.is_ko:
 			continue
 		var off := Iso.to_floor(other.position - center)
-		if off.length() <= radius + BODY_RADIUS:
+		if off.length() <= radius + BODY_RADIUS and not _walled(center, other.position):
 			arena.report_hit(self, other, ability, off.normalized() if off.length() > 0.1 else facing, ambush)
 	if force > 0.0:
 		for item in arena.level.mess_items:
 			var off := Iso.to_floor(item.position - center)
-			if off.length() <= radius + 6.0:
+			if off.length() <= radius + 6.0 and not _walled(center, item.position):
 				arena.report_mess_hit(item, force, off)
 	if demolition > 0.0:
 		for f in arena.level.furniture:
-			if f.can_be_damaged() and Iso.fdist(center, f.position) <= radius + f.reach():
+			if f is WallPanel:
+				continue
+			if f.can_be_damaged() and Iso.fdist(center, f.position) <= radius + f.reach() and not _walled(center, f.position):
 				arena.report_furniture_hit(f, demolition, self, ability)
+		_hit_nearest_wall(center, radius, 180.0, demolition, ability)
+
+
+## Is there a standing wall between a and b?
+func _walled(a: Vector2, b: Vector2) -> bool:
+	return not arena.level.wall_between(a, b).is_empty()
+
+
+## Only the one nearest wall panel (in the swing's cone) takes a hit or a blast,
+## so a hole is exactly as big as the panels really broken. Weak hits don't
+## bother the host: they'd do nothing to a wall.
+func _hit_nearest_wall(center: Vector2, radius: float, half_arc: float, demolition: float, ability: int) -> void:
+	if demolition <= 0.0:
+		return
+	var best: WallPanel = null
+	var best_d := INF
+	for panel in arena.level.wall_panels:
+		if panel.wrecked:
+			continue
+		var l := panel.line()
+		var near := Iso.closest_on_segment(center, l[0], l[1])
+		var d := maxf(0.0, Iso.fdist(center, near) - WallPanel.HALF_THICK)
+		if d > radius or d >= best_d:
+			continue
+		var off := Iso.to_floor(near - center)
+		if half_arc < 180.0 and off.length() > 4.0 and absf(rad_to_deg(facing.angle_to(off))) > half_arc:
+			continue
+		best = panel
+		best_d = d
+	if best and best.can_be_damaged() and demolition >= best.min_hit:
+		arena.report_furniture_hit(best, demolition, self, ability)
 
 
 @rpc("authority", "call_local", "reliable")
@@ -933,6 +1012,7 @@ func _process(delta: float) -> void:
 		else:
 			target_alpha = 0.08 if moving and not hiding else 0.0
 	modulate.a = move_toward(modulate.a, target_alpha, delta * 5.0)
+	_seen = target_alpha >= 0.3
 
 	if dashing and not is_ko and not stealthed:
 		_ghost_t -= delta
